@@ -3561,9 +3561,13 @@ public class RIL extends BaseCommands implements CommandsInterface {
         }
         cardStatus.mApplications = new IccCardApplicationStatus[numApplications];
 
+        oldRil = needsOldRilFeature("apptypesim");
+
         for (int i = 0 ; i < numApplications ; i++) {
             appStatus = new IccCardApplicationStatus();
             appStatus.app_type       = appStatus.AppTypeFromRILInt(p.readInt());
+            // Seems the simplest way so we dont mess up the parcel
+            if (oldRil) appStatus.app_type = appStatus.AppTypeFromRILInt(1);
             appStatus.app_state      = appStatus.AppStateFromRILInt(p.readInt());
             appStatus.perso_substate = appStatus.PersoSubstateFromRILInt(p.readInt());
             appStatus.aid            = p.readString();
@@ -3922,7 +3926,16 @@ public class RIL extends BaseCommands implements CommandsInterface {
     responseSignalStrength(Parcel p) {
         // Assume this is gsm, but doesn't matter as ServiceStateTracker
         // sets the proper value.
-        SignalStrength signalStrength = SignalStrength.makeSignalStrengthFromRilParcel(p);
+       SignalStrength signalStrength;
+        if (needsOldRilFeature("signalstrengthgsm")) {
+        int gsmSignal = p.readInt();  
+        int gsmErrRate = p.readInt();
+        signalStrength = new SignalStrength(gsmSignal, gsmErrRate, -1, -1, -1, -1, -1, true);
+        } else {
+         // Assume this is gsm, but doesn't matter as ServiceStateTracker
+         // sets the proper value.   3622
+        signalStrength = SignalStrength.makeSignalStrengthFromRilParcel(p);
+        }
         return signalStrength;
     }
 
