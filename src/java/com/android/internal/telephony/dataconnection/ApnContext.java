@@ -18,6 +18,7 @@ package com.android.internal.telephony.dataconnection;
 
 import android.app.PendingIntent;
 import android.content.Context;
+import android.net.NetworkConfig;
 import android.telephony.Rlog;
 import android.text.TextUtils;
 
@@ -41,7 +42,6 @@ public class ApnContext {
     protected static final boolean DBG = false;
 
     private final Context mContext;
-
     private final String mDataProfileType;
 
     private DctConstants.State mState;
@@ -49,6 +49,7 @@ public class ApnContext {
     private ArrayList<DataProfile> mWaitingDataProfiles = null;
     private final int mPriority;
 
+    public final int priority;
 
     /** A zero indicates that all waiting APNs had a permanent error */
     private AtomicInteger mWaitingApnsPermanentFailureCountDown;
@@ -70,16 +71,17 @@ public class ApnContext {
      * carrier requirements met
      */
     AtomicBoolean mDependencyMet;
-
-    public ApnContext(Context context, String DataProfileType, String logTag) {
+    public ApnContext(Context context, String dataProfileType, String logTag,
+            NetworkConfig config) {
         mContext = context;
-        mDataProfileType = DataProfileType;
+        mDataProfileType = dataProfileType;
         mState = DctConstants.State.IDLE;
         mPriority = DcTrackerBase.mApnPriorities.get(mDataProfileType);
         setReason(Phone.REASON_DATA_ENABLED);
         mDataEnabled = new AtomicBoolean(false);
-        mDependencyMet = new AtomicBoolean(true);
+        mDependencyMet = new AtomicBoolean(config.dependencyMet);
         mWaitingApnsPermanentFailureCountDown = new AtomicInteger(0);
+        priority = config.priority;
         LOG_TAG = logTag;
     }
 
@@ -108,12 +110,12 @@ public class ApnContext {
     }
 
     public synchronized DataProfile getDataProfile() {
-        log("getApnSetting: mDataProfile=" + mDataProfile);
+        log("getDataProfile: mDataProfile=" + mDataProfile);
         return mDataProfile;
     }
 
     public synchronized void setDataProfile(DataProfile dataProfile) {
-        log("setApnSetting: mDataProfile=" + dataProfile);
+        log("setDataProfile: mDataProfile=" + dataProfile);
         mDataProfile = dataProfile;
     }
 
@@ -217,6 +219,13 @@ public class ApnContext {
                                 || (mState == DctConstants.State.FAILED));
     }
 
+    public boolean isConnectedOrConnecting() {
+        return isReady() && ((mState == DctConstants.State.CONNECTED)
+                                || (mState == DctConstants.State.CONNECTING)
+                                || (mState == DctConstants.State.SCANNING)
+                                || (mState == DctConstants.State.RETRYING));
+    }
+
     public void setEnabled(boolean enabled) {
         if (DBG) {
             log("set enabled as " + enabled + ", current state is " + mDataEnabled.get());
@@ -245,7 +254,7 @@ public class ApnContext {
         if (TextUtils.isEmpty(provisioningApn)) {
             return false;
         }
-        if (mDataProfile != null) {
+        if ((mDataProfile != null) && (mDataProfile.apn != null)) {
             return (mDataProfile.apn.equals(provisioningApn));
         } else {
             return false;

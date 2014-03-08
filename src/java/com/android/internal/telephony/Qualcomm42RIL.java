@@ -20,13 +20,13 @@ import android.content.Context;
 import android.os.Message;
 
 /**
- * Backwards compatible RIL implementation for Qualcomm MSIM based
+ * Backwards compatible RIL implementation for Qualcomm 4.2-MR1
  * radios. Android 4.3 added the CELL_INFO_LIST commands, displacing several
  * command ids already used in pre-4.3 RILs.
  * 
  * {@hide}
  */
-public class QualcommMSIM42RIL extends RIL implements CommandsInterface {
+public class Qualcomm42RIL extends RIL implements CommandsInterface {
 
     static final int RIL_REQUEST_IMS_REGISTRATION_STATE = 109;
     static final int RIL_REQUEST_IMS_SEND_SMS = 110;
@@ -38,7 +38,7 @@ public class QualcommMSIM42RIL extends RIL implements CommandsInterface {
     static final int RIL_UNSOL_RESPONSE_IMS_NETWORK_STATE_CHANGED = 1036;
     static final int RIL_UNSOL_TETHERED_MODE_STATE_CHANGED = 1037;
 
-    public QualcommMSIM42RIL(Context context, int networkMode,
+    public Qualcomm42RIL(Context context, int networkMode,
             int cdmaSubscription) {
         super(context, networkMode, cdmaSubscription);
     }

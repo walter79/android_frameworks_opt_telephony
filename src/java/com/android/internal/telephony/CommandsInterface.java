@@ -1,7 +1,8 @@
 /*
- * Copyright (C) 2006 The Android Open Source Project
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  * Not a Contribution.
+ *
+ * Copyright (C) 2006 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -114,11 +115,11 @@ public interface CommandsInterface {
     /**
      * response.obj.result is an int[2]
      *
-     * response.obj.result[0] is registration state
+     * response.obj.result[0] is IMS registration state
      *                        0 - Not registered
      *                        1 - Registered
-     * response.obj.result[1] is of type const RIL_IMS_SMS_Format,
-     *                        corresponds to sms format used for SMS over IMS.
+     * response.obj.result[1] is of type RILConstants.GSM_PHONE or
+     *                                    RILConstants.CDMA_PHONE
      */
     void getImsRegistrationState(Message result);
 
@@ -600,17 +601,6 @@ public interface CommandsInterface {
      void unregisterForRilConnected(Handler h);
 
     /**
-     * Registers the handler for voice system id changed events
-     *
-     * @param h Handler for notification message.
-     * @param what User-defined message code.
-     * @param obj User object.
-     *
-     */
-    void registerForUnsolVoiceSystemId(Handler h, int what, Object obj);
-    void unregisterForUnsolVoiceSystemId(Handler h);
-
-    /**
      * Supply the ICC PIN to the ICC card
      *
      *  returned message
@@ -618,6 +608,9 @@ public interface CommandsInterface {
      *  ar.exception carries exception on failure
      *  This exception is CommandException with an error of PASSWORD_INCORRECT
      *  if the password is incorrect
+     *
+     *  ar.result is an optional array of integers where the first entry
+     *  is the number of attempts remaining before the ICC will be PUK locked.
      *
      * ar.exception and ar.result are null on success
      */
@@ -635,6 +628,9 @@ public interface CommandsInterface {
      *  This exception is CommandException with an error of PASSWORD_INCORRECT
      *  if the password is incorrect
      *
+     *  ar.result is an optional array of integers where the first entry
+     *  is the number of attempts remaining before the ICC will be PUK locked.
+     *
      * ar.exception and ar.result are null on success
      */
 
@@ -649,6 +645,9 @@ public interface CommandsInterface {
      *  This exception is CommandException with an error of PASSWORD_INCORRECT
      *  if the password is incorrect
      *
+     *  ar.result is an optional array of integers where the first entry
+     *  is the number of attempts remaining before the ICC is permanently disabled.
+     *
      * ar.exception and ar.result are null on success
      */
 
@@ -659,11 +658,13 @@ public interface CommandsInterface {
      *
      *  AID (Application ID), See ETSI 102.221 8.1 and 101.220 4
      *
-     *  returned message
      *  retMsg.obj = AsyncResult ar
      *  ar.exception carries exception on failure
      *  This exception is CommandException with an error of PASSWORD_INCORRECT
      *  if the password is incorrect
+     *
+     *  ar.result is an optional array of integers where the first entry
+     *  is the number of attempts remaining before the ICC is permanently disabled.
      *
      * ar.exception and ar.result are null on success
      */
@@ -680,6 +681,9 @@ public interface CommandsInterface {
      *  ar.exception carries exception on failure
      *  This exception is CommandException with an error of PASSWORD_INCORRECT
      *  if the password is incorrect
+     *
+     *  ar.result is an optional array of integers where the first entry
+     *  is the number of attempts remaining before the ICC will be PUK locked.
      *
      * ar.exception and ar.result are null on success
      */
@@ -699,6 +703,9 @@ public interface CommandsInterface {
      *  This exception is CommandException with an error of PASSWORD_INCORRECT
      *  if the password is incorrect
      *
+     *  ar.result is an optional array of integers where the first entry
+     *  is the number of attempts remaining before the ICC will be PUK locked.
+     *
      * ar.exception and ar.result are null on success
      */
 
@@ -714,6 +721,9 @@ public interface CommandsInterface {
      *  ar.exception carries exception on failure
      *  This exception is CommandException with an error of PASSWORD_INCORRECT
      *  if the password is incorrect
+     *
+     *  ar.result is an optional array of integers where the first entry
+     *  is the number of attempts remaining before the ICC is permanently disabled.
      *
      * ar.exception and ar.result are null on success
      */
@@ -733,11 +743,15 @@ public interface CommandsInterface {
      *  This exception is CommandException with an error of PASSWORD_INCORRECT
      *  if the password is incorrect
      *
+     *  ar.result is an optional array of integers where the first entry
+     *  is the number of attempts remaining before the ICC is permanently disabled.
+     *
      * ar.exception and ar.result are null on success
      */
 
     void supplyIccPuk2ForApp(String puk2, String newPin2, String aid, Message result);
 
+    // TODO: Add java doc and indicate that msg.arg1 contains the number of attempts remaining.
     void changeIccPin(String oldPin, String newPin, Message result);
     void changeIccPinForApp(String oldPin, String newPin, String aidPtr, Message result);
     void changeIccPin2(String oldPin2, String newPin2, Message result);
@@ -745,7 +759,7 @@ public interface CommandsInterface {
 
     void changeBarringPassword(String facility, String oldPwd, String newPwd, Message result);
 
-    void supplyDepersonalization(String netpin, int type, Message result);
+    void supplyDepersonalization(String netpin, String type, Message result);
 
     /**
      *  returned message
@@ -1656,12 +1670,6 @@ public interface CommandsInterface {
     public int getLteOnCdmaMode();
 
     /**
-     * Return if the current radio is LTE on GSM
-     * @hide
-     */
-    public int getLteOnGsmMode();
-
-    /**
      * Get the data call profile information from the modem
      *
      * @param appType
@@ -1672,6 +1680,12 @@ public interface CommandsInterface {
      *          Callback message
      */
     public void getDataCallProfile(int appType, Message result);
+
+    /**
+     * Return if the current radio is LTE on GSM
+     * @hide
+     */
+    public int getLteOnGsmMode();
 
     /**
      * Request the ISIM application on the UICC to perform the AKA
@@ -1726,28 +1740,37 @@ public interface CommandsInterface {
     void unregisterForCellInfoList(Handler h);
 
     /**
+     * Set Initial Attach Apn
+     *
+     * @param apn
+     *            the APN to connect to if radio technology is GSM/UMTS.
+     * @param protocol
+     *            one of the PDP_type values in TS 27.007 section 10.1.1.
+     *            For example, "IP", "IPV6", "IPV4V6", or "PPP".
+     * @param authType
+     *            authentication protocol used for this PDP context
+     *            (None: 0, PAP: 1, CHAP: 2, PAP&CHAP: 3)
+     * @param username
+     *            the username for APN, or NULL
+     * @param password
+     *            the password for APN, or NULL
+     * @param result
+     *            callback message contains the information of SUCCESS/FAILURE
+     */
+    public void setInitialAttachApn(String apn, String protocol, int authType, String username,
+            String password, Message result);
+
+    /**
      * Notifiy that we are testing an emergency call
      */
     public void testingEmergencyCall();
 
-    /**
-     * @hide
-     * CM-specific: Ask the RIL about the presence of back-compat flags
-     */
-    public boolean needsOldRilFeature(String feature);
-
-    /**
-     * @hide
-     * samsung stk service implementation - set up registrant for sending
-     * sms send result from modem(RIL) to catService
-     */
-    void setOnCatSendSmsResult(Handler h, int what, Object obj);
-    void unSetOnCatSendSmsResult(Handler h);
 
     /**
      * @return version of the ril.
      */
     int getRilVersion();
+
    /**
      * Sets user selected subscription at Modem.
      *
@@ -1800,4 +1823,18 @@ public interface CommandsInterface {
      * @param response is callback message
      */
     void setLocalCallHold(int lchStatus, Message response);
+
+    /**
+     * @hide
+     * CM-specific: Ask the RIL about the presence of back-compat flags
+     */
+    public boolean needsOldRilFeature(String feature);
+
+    /**
+     * @hide
+     * samsung stk service implementation - set up registrant for sending
+     * sms send result from modem(RIL) to catService
+     */
+    void setOnCatSendSmsResult(Handler h, int what, Object obj);
+    void unSetOnCatSendSmsResult(Handler h);
 }

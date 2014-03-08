@@ -1,8 +1,8 @@
 /*
- * Copyright (C) 2006 The Android Open Source Project
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- *
  * Not a Contribution.
+ *
+ * Copyright (C) 2006 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,7 +53,8 @@ public class SsData {
 
         public boolean isTypeCF() {
             return (this == SS_CFU || this == SS_CF_BUSY || this == SS_CF_NO_REPLY ||
-                  this == SS_CF_NOT_REACHABLE || this == SS_CF_ALL || this == SS_CF_ALL_CONDITIONAL);
+                  this == SS_CF_NOT_REACHABLE || this == SS_CF_ALL ||
+                  this == SS_CF_ALL_CONDITIONAL);
         }
 
         public boolean isTypeUnConditional() {

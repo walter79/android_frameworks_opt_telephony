@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
  * Copyright (c) 2013, The Linux Foundation. All rights reserved.
  * Not a Contribution.
+ * Copyright (C) 2007 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Resources.NotFoundException;
 import android.os.AsyncResult;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -34,8 +35,7 @@ import com.android.internal.telephony.uicc.IccRecords;
 import com.android.internal.telephony.uicc.IccUtils;
 import com.android.internal.telephony.uicc.UiccCard;
 import com.android.internal.telephony.uicc.UiccCardApplication;
-import com.android.internal.telephony.TelephonyProperties;
-
+import com.android.internal.telephony.uicc.IccCardApplicationStatus.AppType;
 import com.android.internal.telephony.uicc.IccCardStatus.CardState;
 import com.android.internal.telephony.uicc.IccRefreshResponse;
 import com.android.internal.telephony.uicc.UiccController;
@@ -89,15 +89,15 @@ public class CatService extends Handler implements AppInterface {
     protected CatCmdMessage mCurrntCmd = null;
     protected CatCmdMessage mMenuCmd = null;
 
-    // Samsung STK
-    private int mTimeoutDest = 0;
-    private int mCallControlResultCode = 0;
-
     protected RilMessageDecoder mMsgDecoder = null;
     protected boolean mStkAppInstalled = false;
 
     protected UiccController mUiccController;
     protected CardState mCardState = CardState.CARDSTATE_ABSENT;
+
+    // Samsung STK
+    private int mTimeoutDest = 0;
+    private int mCallControlResultCode = 0;
 
     // Service constants.
     protected static final int MSG_ID_SESSION_END              = 1;
@@ -123,6 +123,9 @@ public class CatService extends Handler implements AppInterface {
     private static final int DEV_ID_DISPLAY     = 0x02;
     private static final int DEV_ID_UICC        = 0x81;
     private static final int DEV_ID_TERMINAL    = 0x82;
+    private static final int DEV_ID_NETWORK     = 0x83;
+
+    static final String STK_DEFAULT = "Default Message";
 
     // Samsung STK SEND_SMS
     static final int WAITING_SMS_RESULT = 2;
@@ -131,7 +134,6 @@ public class CatService extends Handler implements AppInterface {
     static final int SMS_SEND_OK = 0;
     static final int SMS_SEND_FAIL = 32790;
     static final int SMS_SEND_RETRY = 32810;
-    static final String STK_DEFAULT = "Defualt Message";
 
     /* Intentionally private for singleton */
     private CatService(CommandsInterface ci, UiccCardApplication ca, IccRecords ir,
@@ -155,8 +157,8 @@ public class CatService extends Handler implements AppInterface {
         mCmdIf.setOnCatSendSmsResult(this, MSG_ID_SEND_SMS_RESULT, null); // Samsung STK
         //mCmdIf.setOnSimRefresh(this, MSG_ID_REFRESH, null);
 
-        mCmdIf.setOnCatCcAlphaNotify(this, MSG_ID_ALPHA_NOTIFY, null);
         mCmdIf.registerForIccRefresh(this, MSG_ID_ICC_REFRESH, null);
+        mCmdIf.setOnCatCcAlphaNotify(this, MSG_ID_ALPHA_NOTIFY, null);
         mIccRecords = ir;
         mUiccApplication = ca;
 
@@ -181,32 +183,33 @@ public class CatService extends Handler implements AppInterface {
     }
 
     public void dispose() {
-        CatLog.d(this, "Disposing CatService object");
-        mIccRecords.unregisterForRecordsLoaded(this);
-        // Clean up stk icon if dispose is called
-        broadcastCardStateAndIccRefreshResp(CardState.CARDSTATE_ABSENT, null);
+        synchronized (sInstanceLock) {
+            CatLog.d(this, "Disposing CatService object");
+            mIccRecords.unregisterForRecordsLoaded(this);
 
-        mCmdIf.unSetOnCatSessionEnd(this);
-        mCmdIf.unSetOnCatProactiveCmd(this);
-        mCmdIf.unSetOnCatEvent(this);
-        mCmdIf.unSetOnCatCallSetUp(this);
-        mCmdIf.unSetOnCatSendSmsResult(this);
+            // Clean up stk icon if dispose is called
+            broadcastCardStateAndIccRefreshResp(CardState.CARDSTATE_ABSENT, null);
 
-        mCmdIf.unSetOnCatCcAlphaNotify(this);
-        mCmdIf.unregisterForIccRefresh(this);
-        mCmdIf.unSetOnCatCcAlphaNotify(this);
-        if (mUiccController != null) {
-            mUiccController.unregisterForIccChanged(this);
-            mUiccController = null;
+            mCmdIf.unSetOnCatSessionEnd(this);
+            mCmdIf.unSetOnCatProactiveCmd(this);
+            mCmdIf.unSetOnCatEvent(this);
+            mCmdIf.unSetOnCatCallSetUp(this);
+            mCmdIf.unSetOnCatSendSmsResult(this);
+            mCmdIf.unregisterForIccRefresh(this);
+            if (mUiccController != null) {
+                mUiccController.unregisterForIccChanged(this);
+                mUiccController = null;
+            }
+            if (mUiccApplication != null) {
+                mUiccApplication.unregisterForReady(this);
+            }
+            mMsgDecoder.dispose();
+            mMsgDecoder = null;
+            mCmdIf.unSetOnCatCcAlphaNotify(this);
+            disposeHandlerThread();
+            sInstance = null;
+            removeCallbacksAndMessages(null);
         }
-        if (mUiccApplication != null) {
-            mUiccApplication.unregisterForReady(this);
-        }
-        mMsgDecoder.dispose();
-        mMsgDecoder = null;
-        disposeHandlerThread();
-        removeCallbacksAndMessages(null);
-        sInstance = null;
     }
 
     protected void disposeHandlerThread() {
@@ -323,7 +326,7 @@ public class CatService extends Handler implements AppInterface {
                 }
                 resultCode = cmdParams.mLoadIconFailed ? ResultCode.PRFRMD_ICON_NOT_DISPLAYED
                                                                             : ResultCode.OK;
-                sendTerminalResponse(cmdParams.mCmdDet,resultCode, false, 0, null);
+                sendTerminalResponse(cmdParams.mCmdDet, resultCode, false, 0, null);
                 break;
             case DISPLAY_TEXT:
                 // when application is not required to respond, send an immediate response.
@@ -390,7 +393,6 @@ public class CatService extends Handler implements AppInterface {
                 if (cmdParams instanceof SendUSSDParams) {
                     handleProactiveCommandSendUSSD((SendUSSDParams) cmdParams);
                 }
-
                 if ((((DisplayTextParams)cmdParams).mTextMsg.text != null)
                         && (((DisplayTextParams)cmdParams).mTextMsg.text.equals(STK_DEFAULT))) {
                     message = mContext.getText(com.android.internal.R.string.sending);
@@ -411,18 +413,19 @@ public class CatService extends Handler implements AppInterface {
             case RECEIVE_DATA:
             case SEND_DATA:
                 BIPClientParams cmd = (BIPClientParams) cmdParams;
-                /*
-                 * If the text mesg is null, need to send the response
-                 * back to the card in the following scenarios
-                 * - It has alpha ID tag with no Text Msg (or)
-                 * - If alphaUsrCnf is not set. In the above cases
-                 *   there should be no UI indication given to the user.
+                /* Per 3GPP specification 102.223,
+                 * if the alpha identifier is not provided by the UICC,
+                 * the terminal MAY give information to the user
+                 * noAlphaUsrCnf defines if you need to show user confirmation or not
                  */
-                boolean alphaUsrCnf = SystemProperties.getBoolean(
-                         TelephonyProperties.PROPERTY_ALPHA_USRCNF, false);
-                CatLog.d(this, "alphaUsrCnf: " + alphaUsrCnf + ", bHasAlphaId: " + cmd.mHasAlphaId);
-
-                if (( cmd.mTextMsg.text == null) && ( cmd.mHasAlphaId || !alphaUsrCnf)) {
+                boolean noAlphaUsrCnf = false;
+                try {
+                    noAlphaUsrCnf = mContext.getResources().getBoolean(
+                            com.android.internal.R.bool.config_stkNoAlphaUsrCnf);
+                } catch (NotFoundException e) {
+                    noAlphaUsrCnf = false;
+                }
+                if ((cmd.mTextMsg.text == null) && (cmd.mHasAlphaId || noAlphaUsrCnf)) {
                     CatLog.d(this, "cmd " + cmdParams.getCommandType() + " with null alpha id");
                     // If alpha length is zero, we just respond with OK.
                     if (isProactiveCmd) {
@@ -735,10 +738,13 @@ public class CatService extends Handler implements AppInterface {
             /* Since Cat is not tied to any application, but rather is Uicc application
              * in itself - just get first FileHandler and IccRecords object
              */
-            ca = ic.getApplicationIndex(0);
-            if (ca != null) {
-                fh = ca.getIccFileHandler();
-                ir = ca.getIccRecords();
+            for (int i = 0; i < ic.getNumApplications(); i++) {
+                ca = ic.getApplicationIndex(i);
+                if (ca != null && (ca.getType() != AppType.APPTYPE_UNKNOWN)) {
+                    fh = ca.getIccFileHandler();
+                    ir = ca.getIccRecords();
+                    break;
+                }
             }
         }
         synchronized (sInstanceLock) {
@@ -841,10 +847,10 @@ public class CatService extends Handler implements AppInterface {
                 if (ar != null && ar.result != null) {
                     broadcastAlphaMessage((String)ar.result);
                 } else {
-                    CatLog.e(this, "CAT Alpha message: ar.result is null");
+                    CatLog.d(this, "CAT Alpha message: ar.result is null");
                 }
             } else {
-                CatLog.e(this, "CAT Alpha message: msg.obj is null");
+                CatLog.d(this, "CAT Alpha message: msg.obj is null");
             }
             break;
         case MSG_ID_TIMEOUT: // Should only be called for Samsung STK
@@ -1119,6 +1125,28 @@ public class CatService extends Handler implements AppInterface {
         return (numReceiver > 0);
     }
 
+    protected void updateIccAvailability() {
+        CardState newState = CardState.CARDSTATE_ABSENT;
+        if (null == mUiccController) {
+            return;
+        }
+        UiccCard newCard = mUiccController.getUiccCard();
+        if (newCard != null) {
+            newState = newCard.getCardState();
+        }
+        CardState oldState = mCardState;
+        mCardState = newState;
+        CatLog.d(this,"New Card State = " + newState + " " + "Old Card State = " + oldState);
+        if (oldState == CardState.CARDSTATE_PRESENT &&
+                newState != CardState.CARDSTATE_PRESENT) {
+            broadcastCardStateAndIccRefreshResp(newState, null);
+        } else if (oldState != CardState.CARDSTATE_PRESENT &&
+                newState == CardState.CARDSTATE_PRESENT) {
+            // Card moved to PRESENT STATE.
+            mCmdIf.reportStkServiceIsRunning(null);
+        }
+    }
+
     /**
      * Samsung STK SEND_SMS
      * @param cmdPar
@@ -1149,28 +1177,5 @@ public class CatService extends Handler implements AppInterface {
         cancelTimeOut();
         mTimeoutDest = timeout;
         sendMessageDelayed(obtainMessage(MSG_ID_TIMEOUT), delay);
-    }
-
-    protected void updateIccAvailability() {
-        CardState newState = CardState.CARDSTATE_ABSENT;
-        if (null == mUiccController) {
-            return;
-        }
-        UiccCard newCard = mUiccController.getUiccCard();
-        if (newCard != null) {
-            newState = newCard.getCardState();
-        }
-        CardState oldState = mCardState;
-        mCardState = newState;
-        CatLog.d(this,"New Card State = " + newState + " " + "Old Card State = " + oldState);
-        if (oldState == CardState.CARDSTATE_PRESENT &&
-                newState != CardState.CARDSTATE_PRESENT) {
-            broadcastCardStateAndIccRefreshResp(newState, null);
-        } else if (oldState != CardState.CARDSTATE_PRESENT &&
-                newState == CardState.CARDSTATE_PRESENT) {
-            // Card moved to PRESENT STATE.
-            mCmdIf.reportStkServiceIsRunning(null);
-        }
-
     }
 }

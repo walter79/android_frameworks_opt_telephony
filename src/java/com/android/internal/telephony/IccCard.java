@@ -115,9 +115,9 @@ public interface IccCard {
     public boolean getIccFdnAvailable();
 
     /**
-     * Supply Perso depersonalization code to the RIL
+     * Supply Depersonalization code to the RIL
      */
-    public void supplyDepersonalization (String pin, int type, Message onComplete);
+    public void supplyDepersonalization (String pin, String type, Message onComplete);
 
     /**
      * Check whether ICC pin lock is enabled

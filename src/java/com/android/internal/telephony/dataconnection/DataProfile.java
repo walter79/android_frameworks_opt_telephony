@@ -38,9 +38,6 @@ public abstract class DataProfile {
     public String mmsProxy;
     public String mmsPort;
 
-    /* ID of the profile in the modem */
-    protected int mProfileId = 0;
-
     /**
      * Current status of APN
      * true : enabled APN, false : disabled APN.
@@ -73,12 +70,18 @@ public abstract class DataProfile {
         }
     }
 
-    public boolean mTetheredCallOn = false;
-
     private DataConnection mDc = null;
 
     public DataProfile (int id, String numeric, String apn, String user, String password,
             int authType, String[] types, String protocol, String roamingProtocol, int bearer) {
+        this(id, numeric, apn, user, password, authType, types, protocol, roamingProtocol,
+                bearer, "", "", "", "", "", "", false);
+    }
+
+    public DataProfile (int id, String numeric, String apn, String user, String password,
+            int authType, String[] types, String protocol, String roamingProtocol, int bearer,
+            String carrier, String proxy, String port, String mmsc, String mmsProxy,
+            String mmsPort, boolean carrierEnabled) {
         this.id = id;
         this.numeric = numeric;
         this.apn = apn;
@@ -89,10 +92,18 @@ public abstract class DataProfile {
         this.protocol = protocol;
         this.roamingProtocol = roamingProtocol;
         this.bearer = bearer;
+
+        this.carrier = carrier;
+        this.proxy = proxy;
+        this.port = port;
+        this.mmsc = mmsc;
+        this.mmsProxy = mmsProxy;
+        this.mmsPort = mmsPort;
+        this.carrierEnabled = carrierEnabled;
     }
 
     /* package */ boolean isActive() {
-      return mDc != null;
+        return mDc != null;
     }
 
     /* package */void setAsActive(DataConnection dc) {
@@ -101,10 +112,6 @@ public abstract class DataProfile {
 
     /* package */void setAsInactive() {
         mDc = null;
-    }
-
-    public String[] getServiceTypes() {
-        return types.clone();
     }
 
     public String toString() {
@@ -124,10 +131,6 @@ public abstract class DataProfile {
         sb.append(", ").append(roamingProtocol);
         sb.append(", ").append(bearer);
         return sb.toString();
-    }
-
-    public void setProfileId(int profileId) {
-        mProfileId = profileId;
     }
 
     /* some way to identify this data profile uniquely */

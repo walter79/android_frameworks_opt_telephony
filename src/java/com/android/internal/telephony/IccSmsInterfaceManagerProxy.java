@@ -19,11 +19,15 @@ package com.android.internal.telephony;
 import java.util.ArrayList;
 import java.util.List;
 
+import android.Manifest;
 import android.app.Activity;
+import android.app.AppOpsManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Handler;
 import android.os.PowerManager;
 import android.os.RemoteException;
 import android.os.ServiceManager;
@@ -44,9 +48,10 @@ public class IccSmsInterfaceManagerProxy extends ISms.Stub {
             String scAddr = intent.getStringExtra("scAddr");
             String callingPackage = intent.getStringExtra("callingPackage");
             ArrayList<String> parts = intent.getStringArrayListExtra("parts");
-            ArrayList<PendingIntent> sentIntents = intent.getParcelableArrayListExtra("sentIntents");
-            ArrayList<PendingIntent> deliveryIntents = intent.getParcelableArrayListExtra("deliveryIntents");
-            int priority = intent.getIntExtra("priority", -1);
+            ArrayList<PendingIntent> sentIntents =
+                    intent.getParcelableArrayListExtra("sentIntents");
+            ArrayList<PendingIntent> deliveryIntents =
+                    intent.getParcelableArrayListExtra("deliveryIntents");
 
             if (intent.getIntExtra("callingUid", 0) != 0) {
                 callingPackage = callingPackage + "\\" + intent.getIntExtra("callingUid", 0);
@@ -70,14 +75,8 @@ public class IccSmsInterfaceManagerProxy extends ISms.Stub {
             if (parts != null && parts.size() > 0) {
                 text = parts.get(0);
             }
-            if (priority == -1) {
-                mIccSmsInterfaceManager.sendText(callingPackage, destAddr, scAddr, text,
-                        sentIntent, deliveryIntent);
-            }
-            else {
-                mIccSmsInterfaceManager.sendTextWithPriority(callingPackage, destAddr, scAddr, text,
-                        sentIntent, deliveryIntent, priority);
-            }
+            mIccSmsInterfaceManager.sendText(callingPackage, destAddr, scAddr, text,
+                    sentIntent, deliveryIntent);
         }
     };
 
@@ -105,26 +104,42 @@ public class IccSmsInterfaceManagerProxy extends ISms.Stub {
     private Context mContext;
     private PowerManager.WakeLock mWakeLock;
     private static final int WAKE_LOCK_TIMEOUT = 5000;
+    private final Handler mHandler = new Handler();
     private void dispatchPdus(byte[][] pdus) {
-        Intent intent = new Intent(Intents.SMS_RECEIVED_ACTION);
+        Intent intent = new Intent(Intents.SMS_DELIVER_ACTION);
+        // Direct the intent to only the default SMS app. If we can't find a default SMS app
+        // then sent it to all broadcast receivers.
+        ComponentName componentName = SmsApplication.getDefaultSmsApplication(mContext, true);
+        if (componentName == null)
+            return;
+        // Deliver SMS message only to this receiver
+        intent.setComponent(componentName);
         intent.putExtra("pdus", pdus);
         intent.putExtra("format", SmsMessage.FORMAT_SYNTHETIC);
-        dispatch(intent, SMSDispatcher.RECEIVE_SMS_PERMISSION);
+        dispatch(intent, Manifest.permission.RECEIVE_SMS);
+
+        intent.setAction(Intents.SMS_RECEIVED_ACTION);
+        intent.setComponent(null);
+        dispatch(intent, Manifest.permission.RECEIVE_SMS);
     }
 
     private void dispatch(Intent intent, String permission) {
         // Hold a wake lock for WAKE_LOCK_TIMEOUT seconds, enough to give any
         // receivers time to take their own wake locks.
         mWakeLock.acquire(WAKE_LOCK_TIMEOUT);
-        mContext.sendOrderedBroadcast(intent, permission);
+        intent.addFlags(Intent.FLAG_RECEIVER_NO_ABORT);
+        mContext.sendOrderedBroadcast(intent, permission, AppOpsManager.OP_RECEIVE_SMS, null,
+                mHandler, Activity.RESULT_OK, null, null);
     }
 
-    public void synthesizeMessages(String originatingAddress, String scAddress, List<String> messages, long timestampMillis) throws RemoteException {
+    public void synthesizeMessages(String originatingAddress, String scAddress,
+            List<String> messages, long timestampMillis) throws RemoteException {
         mContext.enforceCallingPermission(
                 android.Manifest.permission.BROADCAST_SMS, "");
         byte[][] pdus = new byte[messages.size()][];
         for (int i = 0; i < messages.size(); i++) {
-            SyntheticSmsMessage message = new SyntheticSmsMessage(originatingAddress, scAddress, messages.get(i), timestampMillis);
+            SyntheticSmsMessage message = new SyntheticSmsMessage(originatingAddress,
+                    scAddress, messages.get(i), timestampMillis);
             pdus[i] = message.getPdu();
         }
         dispatchPdus(pdus);
@@ -179,6 +194,11 @@ public class IccSmsInterfaceManagerProxy extends ISms.Stub {
         mContext.enforceCallingPermission(
                 android.Manifest.permission.SEND_SMS,
                 "Sending SMS message");
+        if (mIccSmsInterfaceManager.isShortSMSCode(destAddr)) {
+            mIccSmsInterfaceManager.sendText(callingPackage, destAddr, scAddr, text,
+                    sentIntent, deliveryIntent);
+            return;
+        }
         ArrayList<String> parts = new ArrayList<String>();
         parts.add(text);
         ArrayList<PendingIntent> sentIntents = new ArrayList<PendingIntent>();
@@ -196,11 +216,65 @@ public class IccSmsInterfaceManagerProxy extends ISms.Stub {
         mContext.enforceCallingPermission(
                 android.Manifest.permission.SEND_SMS,
                 "Sending SMS message");
+        if (mIccSmsInterfaceManager.isShortSMSCode(destAddr)) {
+            mIccSmsInterfaceManager.sendMultipartText(callingPackage, destAddr, scAddr,
+                    parts, sentIntents, deliveryIntents);
+            return;
+        }
         broadcastOutgoingSms(callingPackage, destAddr, scAddr, true,
                 parts != null ? new ArrayList<String>(parts) : null,
                 sentIntents != null ? new ArrayList<PendingIntent>(sentIntents) : null,
                 deliveryIntents != null ?  new ArrayList<PendingIntent>(deliveryIntents) : null,
                 -1);
+    }
+
+    @Override
+    public void sendTextWithOptions(String callingPackage, String destAddr, String scAddr,
+            String text, PendingIntent sentIntent, PendingIntent deliveryIntent, int priority) {
+        mContext.enforceCallingPermission(
+                android.Manifest.permission.SEND_SMS,
+                "Sending SMS message");
+        if (mIccSmsInterfaceManager.isShortSMSCode(destAddr)) {
+            mIccSmsInterfaceManager.sendTextWithOptions(callingPackage, destAddr, scAddr, text,
+                    sentIntent, deliveryIntent, priority);
+            return;
+        }
+        ArrayList<String> parts = new ArrayList<String>();
+        parts.add(text);
+        ArrayList<PendingIntent> sentIntents = new ArrayList<PendingIntent>();
+        sentIntents.add(sentIntent);
+        ArrayList<PendingIntent> deliveryIntents = new ArrayList<PendingIntent>();
+        deliveryIntents.add(deliveryIntent);
+        broadcastOutgoingSms(callingPackage, destAddr, scAddr, false, parts, sentIntents,
+                deliveryIntents, priority);
+    }
+
+    @Override
+    public void sendMultipartTextWithOptions(String callingPackage, String destAddr, String scAddr,
+            List<String> parts, List<PendingIntent> sentIntents,
+            List<PendingIntent> deliveryIntents, int priority) {
+        mContext.enforceCallingPermission(
+                android.Manifest.permission.SEND_SMS,
+                "Sending SMS message");
+        if (mIccSmsInterfaceManager.isShortSMSCode(destAddr)) {
+            mIccSmsInterfaceManager.sendMultipartTextWithOptions(callingPackage, destAddr, scAddr,
+                    parts, sentIntents, deliveryIntents, priority);
+            return;
+        }
+        broadcastOutgoingSms(callingPackage, destAddr, scAddr, true,
+                parts != null ? new ArrayList<String>(parts) : null,
+                sentIntents != null ? new ArrayList<PendingIntent>(sentIntents) : null,
+                deliveryIntents != null ?  new ArrayList<PendingIntent>(deliveryIntents) : null,
+                priority);
+    }
+
+
+    @Override
+    public void sendDataWithOrigPort(String callingPackage, String destAddr, String scAddr,
+            int destPort, int origPort, byte[] data, PendingIntent sentIntent,
+            PendingIntent deliveryIntent) {
+        mIccSmsInterfaceManager.sendDataWithOrigPort(callingPackage, destAddr, scAddr,
+                destPort, origPort, data, sentIntent, deliveryIntent);
     }
 
     @Override
@@ -233,23 +307,6 @@ public class IccSmsInterfaceManagerProxy extends ISms.Stub {
     @Override
     public void setPremiumSmsPermission(String packageName, int permission) {
         mIccSmsInterfaceManager.setPremiumSmsPermission(packageName, permission);
-    }
-
-    @Override
-    public void sendTextWithPriority(String callingPackage, String destAddr, String scAddr, String text,
-            PendingIntent sentIntent, PendingIntent deliveryIntent, int priority)
-            throws RemoteException {
-        mContext.enforceCallingPermission(
-                android.Manifest.permission.SEND_SMS,
-                "Sending SMS message");
-        ArrayList<String> parts = new ArrayList<String>();
-        parts.add(text);
-        ArrayList<PendingIntent> sentIntents = new ArrayList<PendingIntent>();
-        sentIntents.add(sentIntent);
-        ArrayList<PendingIntent> deliveryIntents = new ArrayList<PendingIntent>();
-        deliveryIntents.add(deliveryIntent);
-        broadcastOutgoingSms(callingPackage, destAddr, scAddr, false, parts, sentIntents,
-                deliveryIntents, priority);
     }
 
     @Override

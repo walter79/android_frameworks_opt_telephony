@@ -15,6 +15,12 @@
  */
 package com.android.internal.telephony.dataconnection;
 
+import android.content.Context;
+import android.telephony.Rlog;
+
+import com.android.internal.R;
+import com.android.internal.telephony.PhoneFactory;
+
 import java.util.HashMap;
 
 /**
@@ -47,7 +53,7 @@ public enum DcFailCause {
     // specified in ril.h
     REGISTRATION_FAIL(-1),
     GPRS_REGISTRATION_FAIL(-2),
-    SIGNAL_LOST(-3),                        /* no retry */
+    SIGNAL_LOST(-3),
     PREF_RADIO_TECH_CHANGED(-4),            /* no retry */
     RADIO_POWER_OFF(-5),                    /* no retry */
     TETHERED_CALL_ACTIVE(-6),               /* no retry */
@@ -81,7 +87,13 @@ public enum DcFailCause {
 
     /** Radio has failed such that the radio should be restarted */
     public boolean isRestartRadioFail() {
-        return (this == REGULAR_DEACTIVATION);
+        Context context = PhoneFactory.getContext();
+        boolean radioResetOnRegularDeact = context.getResources().
+            getBoolean(com.android.internal.R.bool.config_radio_reset_on_regular_deactivation);
+
+        Rlog.d("isRestartRadioFail", "radioResetOnRegularDeact="+radioResetOnRegularDeact);
+
+        return (radioResetOnRegularDeact && (this == REGULAR_DEACTIVATION));
     }
 
     public boolean isPermanentFail() {
@@ -90,7 +102,7 @@ public enum DcFailCause {
                (this == ACTIVATION_REJECT_GGSN) || (this == SERVICE_OPTION_NOT_SUPPORTED) ||
                (this == SERVICE_OPTION_NOT_SUBSCRIBED) || (this == NSAPI_IN_USE) ||
                (this == ONLY_IPV4_ALLOWED) || (this == ONLY_IPV6_ALLOWED) ||
-               (this == PROTOCOL_ERRORS) || (this == SIGNAL_LOST) ||
+               (this == PROTOCOL_ERRORS) ||
                (this == RADIO_POWER_OFF) || (this == TETHERED_CALL_ACTIVE) ||
                (this == RADIO_NOT_AVAILABLE) || (this == UNACCEPTABLE_NETWORK_PARAMETER);
     }

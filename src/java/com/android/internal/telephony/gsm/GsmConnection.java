@@ -211,6 +211,11 @@ public class GsmConnection extends Connection {
     }
 
     @Override
+    public void setConnectTime(long timeInMillis) {
+        mConnectTime = timeInMillis;
+    }
+
+    @Override
     public long getDisconnectTime() {
         return mDisconnectTime;
     }
@@ -371,6 +376,12 @@ public class GsmConnection extends Connection {
             case CallFailCause.DIAL_MODIFIED_TO_DIAL:
                 return DisconnectCause.DIAL_MODIFIED_TO_DIAL;
 
+            case CallFailCause.EMERGENCY_TEMP_FAILURE:
+                return DisconnectCause.EMERGENCY_TEMP_FAILURE;
+
+            case CallFailCause.EMERGENCY_PERM_FAILURE:
+                return DisconnectCause.EMERGENCY_PERM_FAILURE;
+
             case CallFailCause.ERROR_UNSPECIFIED:
             case CallFailCause.NORMAL_CLEARING:
             default:
@@ -382,10 +393,13 @@ public class GsmConnection extends Connection {
                 if (serviceState == ServiceState.STATE_POWER_OFF) {
                     return DisconnectCause.POWER_OFF;
                 } else if (serviceState == ServiceState.STATE_OUT_OF_SERVICE
-                        || serviceState == ServiceState.STATE_EMERGENCY_ONLY ) {
-                    return DisconnectCause.OUT_OF_SERVICE;
-                } else if (uiccAppState != AppState.APPSTATE_READY) {
-                    return DisconnectCause.ICC_ERROR;
+                        || phone.getServiceState().isEmergencyOnly()) {
+                    if (phone.getServiceState().isEmergencyOnly() &&
+                            causeCode == CallFailCause.NORMAL_CLEARING) {
+                        return DisconnectCause.NORMAL;
+                    } else {
+                        return DisconnectCause.OUT_OF_SERVICE;
+                    }
                 } else if (causeCode == CallFailCause.ERROR_UNSPECIFIED) {
                     if (phone.mSST.mRestrictedState.isCsRestricted()) {
                         return DisconnectCause.CS_RESTRICTED;
@@ -398,6 +412,8 @@ public class GsmConnection extends Connection {
                     }
                 } else if (causeCode == CallFailCause.NORMAL_CLEARING) {
                     return DisconnectCause.NORMAL;
+                } else if (uiccAppState != AppState.APPSTATE_READY) {
+                    return DisconnectCause.ICC_ERROR;
                 } else {
                     // If nothing else matches, report unknown call drop reason
                     // to app, not NORMAL call end.

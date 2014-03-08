@@ -1,7 +1,8 @@
 /*
- * Copyright (C) 2006 The Android Open Source Project
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  * Not a Contribution.
+ *
+ * Copyright (C) 2006 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -441,7 +442,7 @@ public final class SimulatedCommands extends BaseCommands
     }
 
     @Override
-    public void supplyDepersonalization(String netpin, int type, Message result)  {
+    public void supplyDepersonalization(String netpin, String type, Message result)  {
         unimplemented(result);
     }
 
@@ -1662,8 +1663,6 @@ public final class SimulatedCommands extends BaseCommands
         unimplemented(response);
     }
 
-    public boolean needsOldRilFeature(String feature) { return false; }
-
     @Override
     public void getCellInfoList(Message response) {
         unimplemented(response);
@@ -1672,6 +1671,11 @@ public final class SimulatedCommands extends BaseCommands
     @Override
     public void setCellInfoListRate(int rateInMillis, Message response) {
         unimplemented(response);
+    }
+
+    @Override
+    public void setInitialAttachApn(String apn, String protocol, int authType, String username,
+            String password, Message result) {
     }
 
     @Override
@@ -1691,19 +1695,5 @@ public final class SimulatedCommands extends BaseCommands
         unimplemented(response);
     }
 
-    @Override
-    public void setUiccSubscription(int slotId, int appIndex, int subId, int subStatus,
-            Message response) {
-        unimplemented(response);
-    }
-
-    @Override
-    public void setDataSubscription (Message response) {
-        unimplemented(response);
-    }
-
-    @Override
-    public void getDataCallProfile(int appType, Message response){
-        unimplemented(response);
-    }
+    public boolean needsOldRilFeature(String feature) { return false; }
 }

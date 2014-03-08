@@ -145,6 +145,9 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
     private ContentResolver mCr;
     private String mCurrentCarrier = null;
 
+    private boolean isRegisteredForRecordsLoaded = false;
+    private boolean isRegisteredForReady = false;
+
     private ContentObserver mAutoTimeObserver = new ContentObserver(new Handler()) {
         @Override
         public void onChange(boolean selfChange) {
@@ -214,8 +217,14 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
         mCi.unregisterForVoiceNetworkStateChanged(this);
         mCi.unregisterForCdmaOtaProvision(this);
         mPhone.unregisterForEriFileLoaded(this);
-        if (mUiccApplcation != null) {mUiccApplcation.unregisterForReady(this);}
-        if (mIccRecords != null) {mIccRecords.unregisterForRecordsLoaded(this);}
+        if (mUiccApplcation != null) {
+            mUiccApplcation.unregisterForReady(this);
+            isRegisteredForReady = false;
+        }
+        if (mIccRecords != null) {
+            mIccRecords.unregisterForRecordsLoaded(this);
+            isRegisteredForRecordsLoaded = false;
+        }
         mCi.unSetOnNITZTime(this);
         mCr.unregisterContentObserver(mAutoTimeObserver);
         mCr.unregisterContentObserver(mAutoTimeZoneObserver);
@@ -281,9 +290,6 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
         switch (msg.what) {
         case EVENT_CDMA_SUBSCRIPTION_SOURCE_CHANGED:
             handleCdmaSubscriptionSource(mCdmaSSM.getCdmaSubscriptionSource());
-            if (mIsSubscriptionFromRuim) {
-                registerForRuimEvents();
-            }
             break;
 
         case EVENT_RUIM_READY:
@@ -302,6 +308,8 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
             break;
 
         case EVENT_NV_READY:
+            updatePhoneObject();
+
             // For Non-RUIM phones, the subscription information is stored in
             // Non Volatile. Here when Non-Volatile is ready, we can poll the CDMA
             // subscription info.
@@ -409,17 +417,6 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
                     mIsMinInfoReady = true;
 
                     updateOtaspState();
-                    if (!mIsSubscriptionFromRuim && mIccRecords != null) {
-                        if (DBG) {
-                            log("GET_CDMA_SUBSCRIPTION set imsi in mIccRecords");
-                        }
-                        mIccRecords.setImsi(getImsi());
-                    } else {
-                        if (DBG) {
-                            log("GET_CDMA_SUBSCRIPTION either mIccRecords is null  or NV type device" +
-                                    " - not setting Imsi in mIccRecords");
-                        }
-                    }
                 } else {
                     if (DBG) {
                         log("GET_CDMA_SUBSCRIPTION: error parsing cdmaSubscription params num="
@@ -457,6 +454,8 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
             break;
 
         case EVENT_RUIM_RECORDS_LOADED:
+            log("EVENT_RUIM_RECORDS_LOADED: what=" + msg.what);
+            updatePhoneObject();
             updateSpnDisplay();
             break;
 
@@ -511,6 +510,8 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
         if (!mIsSubscriptionFromRuim) {
             // NV is ready when subscription source is NV
             sendMessage(obtainMessage(EVENT_NV_READY));
+        } else {
+            registerForRuimEvents();
         }
     }
 
@@ -769,11 +770,6 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
                 return;
             }
 
-            if (!mCi.getRadioState().isOn()) {
-                // Radio has crashed or turned off.
-                cancelPollState();
-                return;
-            }
 
             if (err != CommandException.Error.OP_NOT_ALLOWED_BEFORE_REG_NW) {
                 loge("handlePollStateResult: RIL returned an error where it must succeed"
@@ -808,14 +804,23 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
             if (TextUtils.isEmpty(mPrlVersion)) {
                 isPrlLoaded = false;
             }
-            if (!isPrlLoaded) {
+            if (!isPrlLoaded || (mNewSS.getRilVoiceRadioTechnology()
+                                        == ServiceState.RIL_RADIO_TECHNOLOGY_UNKNOWN)) {
+                log("Turn off roaming indicator if !isPrlLoaded or voice RAT is unknown");
                 mNewSS.setCdmaRoamingIndicator(EriInfo.ROAMING_INDICATOR_OFF);
             } else if (!isSidsAllZeros()) {
                 if (!namMatch && !mIsInPrl) {
                     // Use default
                     mNewSS.setCdmaRoamingIndicator(mDefaultRoamingIndicator);
                 } else if (namMatch && !mIsInPrl) {
-                    mNewSS.setCdmaRoamingIndicator(EriInfo.ROAMING_INDICATOR_FLASH);
+                    // TODO this will be removed when we handle roaming on LTE on CDMA+LTE phones
+                    if (mNewSS.getRilVoiceRadioTechnology()
+                            == ServiceState.RIL_RADIO_TECHNOLOGY_LTE) {
+                        log("Turn off roaming indicator as voice is LTE");
+                        mNewSS.setCdmaRoamingIndicator(EriInfo.ROAMING_INDICATOR_OFF);
+                    } else {
+                        mNewSS.setCdmaRoamingIndicator(EriInfo.ROAMING_INDICATOR_FLASH);
+                    }
                 } else if (!namMatch && mIsInPrl) {
                     // Use the one from PRL/ERI
                     mNewSS.setCdmaRoamingIndicator(mRoamingIndicator);
@@ -885,7 +890,19 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
             mGotCountryCode = false;
 
             pollStateDone();
-            break;
+
+            /**
+             * If iwlan feature is enabled then we do get
+             * voice_network_change indication from RIL. At this moment we
+             * dont know the current RAT since we are in Airplane mode.
+             * We have to request for current registration state and hence
+             * fallthrough to default case only if iwlan feature is
+             * applicable.
+             */
+            if (!isIwlanFeatureAvailable()) {
+                /* fall-through */
+                break;
+            }
 
         default:
             // Issue all poll-related commands at once, then count
@@ -998,6 +1015,9 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
         boolean hasCdmaDataConnectionChanged =
                        mSS.getDataRegState() != mNewSS.getDataRegState();
 
+        boolean hasRilVoiceRadioTechnologyChanged =
+                mSS.getRilVoiceRadioTechnology() != mNewSS.getRilVoiceRadioTechnology();
+
         boolean hasRilDataRadioTechnologyChanged =
                 mSS.getRilDataRadioTechnology() != mNewSS.getRilDataRadioTechnology();
 
@@ -1028,12 +1048,19 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
         mCellLoc = mNewCellLoc;
         mNewCellLoc = tcl;
 
-        mNewSS.setStateOutOfService(); // clean slate for next time
+        if (hasRilVoiceRadioTechnologyChanged) {
+            updatePhoneObject();
+        }
 
         if (hasRilDataRadioTechnologyChanged) {
             mPhone.setSystemProperty(TelephonyProperties.PROPERTY_DATA_NETWORK_TYPE,
                     ServiceState.rilRadioTechnologyToString(mSS.getRilDataRadioTechnology()));
-            mDataRatChangedRegistrants.notifyRegistrants();
+
+            if (isIwlanFeatureAvailable()
+                    && (ServiceState.RIL_RADIO_TECHNOLOGY_IWLAN
+                        == mSS.getRilDataRadioTechnology())) {
+                handleIwlan();
+            }
         }
 
         if (hasRegistered) {
@@ -1098,16 +1125,31 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
             mPhone.notifyServiceStateChanged(mSS);
         }
 
-        if (hasCdmaDataConnectionAttached) {
-            mAttachedRegistrants.notifyRegistrants();
-        }
-
+        // First notify detached, then rat changed, then attached - that's the way it
+        // happens in the modem.
+        // Behavior of recipients (DcTracker, for instance) depends on this sequence
+        // since DcTracker reloads profiles on "rat_changed" notification and sets up
+        // data call on "attached" notification.
         if (hasCdmaDataConnectionDetached) {
             mDetachedRegistrants.notifyRegistrants();
         }
 
         if (hasCdmaDataConnectionChanged || hasRilDataRadioTechnologyChanged) {
-            mPhone.notifyDataConnection(null);
+            notifyDataRegStateRilRadioTechnologyChanged();
+            if (isIwlanFeatureAvailable()
+                    && (ServiceState.RIL_RADIO_TECHNOLOGY_IWLAN
+                        == mSS.getRilDataRadioTechnology())) {
+                mPhone.notifyDataConnection(Phone.REASON_IWLAN_AVAILABLE);
+                //DCT shall inform the availability of APN for all non-default
+                //contexts.
+                mIwlanRegistrants.notifyRegistrants();
+            } else {
+                mPhone.notifyDataConnection(null);
+            }
+        }
+
+        if (hasCdmaDataConnectionAttached) {
+            mAttachedRegistrants.notifyRegistrants();
         }
 
         if (hasRoamingOn) {
@@ -1614,12 +1656,11 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
     }
 
     /**
-     * Returns IMSI as MCC + MNC + MIN
+     * Returns IMSI from NV in the format MCC + MNC + MIN
      */
-    public String getImsi() {
-        // TODO: When RUIM is enabled, IMSI will come from RUIM not build-time props.
+    public String getNvImsi() {
         String operatorNumeric = getSystemProperty(
-                TelephonyProperties.PROPERTY_ICC_OPERATOR_NUMERIC, "");
+                CDMAPhone.PROPERTY_CDMA_HOME_OPERATOR_NUMERIC, "");
 
         if (!TextUtils.isEmpty(operatorNumeric) && getCdmaMin() != null) {
             return (operatorNumeric + getCdmaMin());
@@ -1716,9 +1757,13 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
 
     private void registerForRuimEvents() {
         log("registerForRuimEvents");
-        mUiccApplcation.registerForReady(this, EVENT_RUIM_READY, null);
-        if (mIccRecords != null) {
+        if (mUiccApplcation != null && !isRegisteredForReady) {
+            mUiccApplcation.registerForReady(this, EVENT_RUIM_READY, null);
+            isRegisteredForReady = true;
+        }
+        if (mIccRecords != null && !isRegisteredForRecordsLoaded) {
              mIccRecords.registerForRecordsLoaded(this, EVENT_RUIM_RECORDS_LOADED, null);
+             isRegisteredForRecordsLoaded = true;
         }
     }
     protected UiccCardApplication getUiccCardApplication() {
@@ -1737,8 +1782,10 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
             if (mUiccApplcation != null) {
                 log("Removing stale icc objects.");
                 mUiccApplcation.unregisterForReady(this);
+                isRegisteredForReady = false;
                 if (mIccRecords != null) {
                     mIccRecords.unregisterForRecordsLoaded(this);
+                    isRegisteredForRecordsLoaded = false;
                 }
                 mIccRecords = null;
                 mUiccApplcation = null;

@@ -25,7 +25,11 @@ import android.os.SystemClock;
 import android.telephony.CellInfo;
 import android.telephony.ServiceState;
 import android.telephony.SignalStrength;
+import android.util.Pair;
 import android.util.TimeUtils;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.content.Context;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -97,10 +101,11 @@ public abstract class ServiceStateTracker extends Handler {
     protected RegistrantList mRoamingOffRegistrants = new RegistrantList();
     protected RegistrantList mAttachedRegistrants = new RegistrantList();
     protected RegistrantList mDetachedRegistrants = new RegistrantList();
+    protected RegistrantList mIwlanRegistrants = new RegistrantList();
+    protected RegistrantList mDataRegStateOrRatChangedRegistrants = new RegistrantList();
     protected RegistrantList mNetworkAttachedRegistrants = new RegistrantList();
     protected RegistrantList mPsRestrictEnabledRegistrants = new RegistrantList();
     protected RegistrantList mPsRestrictDisabledRegistrants = new RegistrantList();
-    protected RegistrantList mDataRatChangedRegistrants = new RegistrantList();
 
     /* Radio power off pending flag and tag counter */
     protected boolean mPendingRadioPowerOffAfterDataOff = false;
@@ -240,6 +245,20 @@ public abstract class ServiceStateTracker extends Handler {
     }
 
     /**
+     * Notify all mDataConnectionRatChangeRegistrants using an
+     * AsyncResult in msg.obj where AsyncResult#result contains the
+     * new RAT as an Integer Object.
+     */
+    protected void notifyDataRegStateRilRadioTechnologyChanged() {
+        int rat = mSS.getRilDataRadioTechnology();
+        int drs = mSS.getDataRegState();
+        if (DBG) log("notifyDataRegStateRilRadioTechnologyChanged: drs=" + drs + " rat=" + rat);
+        mPhoneBase.setSystemProperty(TelephonyProperties.PROPERTY_DATA_NETWORK_TYPE,
+                ServiceState.rilRadioTechnologyToString(rat));
+        mDataRegStateOrRatChangedRegistrants.notifyResult(new Pair<Integer, Integer>(drs, rat));
+    }
+
+    /**
      * Some operators have been known to report registration failure
      * data only devices, to fix that use DataRegState.
      */
@@ -254,6 +273,9 @@ public abstract class ServiceStateTracker extends Handler {
         }
     }
 
+    protected void updatePhoneObject() {
+        mPhoneBase.updatePhoneObject(mSS.getRilVoiceRadioTechnology());
+    }
 
     /**
      * Registration point for combined roaming on
@@ -472,6 +494,39 @@ public abstract class ServiceStateTracker extends Handler {
     }
 
     /**
+     * Registration IWLAN RAT availability.
+     * @param h handler to notify
+     * @param what what code of message when delivered
+     * @param obj placed in Message.obj
+     */
+    public void registerForIwlanAvailable(Handler h, int what, Object obj) {
+        Registrant r = new Registrant(h, what, obj);
+        mIwlanRegistrants.add(r);
+    }
+
+    public void unregisterForIwlanAvailable(Handler h) {
+        mIwlanRegistrants.remove(h);
+    }
+
+    /**
+     * Registration for DataConnection RIL Data Radio Technology changing. The
+     * new radio technology will be returned AsyncResult#result as an Integer Object.
+     * The AsyncResult will be in the notification Message#obj.
+     *
+     * @param h handler to notify
+     * @param what what code of message when delivered
+     * @param obj placed in Message.obj
+     */
+    public void registerForDataRegStateOrRatChanged(Handler h, int what, Object obj) {
+        Registrant r = new Registrant(h, what, obj);
+        mDataRegStateOrRatChangedRegistrants.add(r);
+        notifyDataRegStateRilRadioTechnologyChanged();
+    }
+    public void unregisterForDataRegStateOrRatChanged(Handler h) {
+        mDataRegStateOrRatChangedRegistrants.remove(h);
+    }
+
+    /**
      * Registration point for transition into network attached.
      * @param h handler to notify
      * @param what what code of message when delivered
@@ -525,21 +580,6 @@ public abstract class ServiceStateTracker extends Handler {
 
     public void unregisterForPsRestrictedDisabled(Handler h) {
         mPsRestrictDisabledRegistrants.remove(h);
-    }
-
-    /**
-     * Registration point for data transition to different radio access technology.
-     * @param h handler to notify
-     * @param what what code of message when delivered
-     * @param obj placed in Message.obj
-     */
-    public void registerForDataRatChanged(Handler h, int what, Object obj) {
-        Registrant r = new Registrant(h, what, obj);
-        mDataRatChangedRegistrants.add(r);
-    }
-
-    public void unregisterForDataRatChanged(Handler h) {
-        mDataRatChangedRegistrants.remove(h);
     }
 
     /**
@@ -769,5 +809,43 @@ public abstract class ServiceStateTracker extends Handler {
         boolean value = Thread.currentThread() != getLooper().getThread();
         if (VDBG) log("isCallerOnDifferentThread: " + value);
         return value;
+    }
+
+    protected boolean isIwlanFeatureAvailable() {
+        boolean iwlanAvailable = mPhoneBase.getContext().getResources()
+                .getBoolean(com.android.internal.R.bool.config_feature_iwlan_enabled);
+        log("Iwlan feature available = " + iwlanAvailable);
+        return iwlanAvailable && isWifiConnected();
+    }
+
+    protected boolean isWifiConnected() {
+        log("isWifiConnected()");
+        ConnectivityManager connManager
+                = (ConnectivityManager) mPhoneBase.getContext().getSystemService(Context
+                        .CONNECTIVITY_SERVICE);
+        NetworkInfo mWifi = connManager.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
+
+        boolean wifi = mWifi.isConnected();
+        log("isWifiConnected = " + wifi);
+
+        return wifi;
+    }
+
+    /**
+     * As per 3GPP spec during APM WWAN can be offloaded to IWLAN.
+     * in such a handover the internet or default IP traffic is
+     * carried over the wifi transport(not neccessarily using core network)
+     * but the MMS and SUPL, which does require suppoort of core network can be
+     * offloaded on IWLAN and using a secure ipsec tunnel. This way the
+     * signalling and data could be sent over to core network even in APM.
+     *
+     * Below method simply disables the default APN type for the cases where WWAN
+     * to iWLAN handover occurs without APM.
+     */
+    protected void handleIwlan() {
+        log("handleIwlan");
+
+        DcTrackerBase dcTracker = mPhoneBase.mDcTracker;
+        dcTracker.disableApnType(PhoneConstants.APN_TYPE_DEFAULT);
     }
 }

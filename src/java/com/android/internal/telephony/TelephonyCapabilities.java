@@ -71,9 +71,8 @@ public class TelephonyCapabilities {
     }
 
     /**
-     * Return true if the current phone supports voice message count
-     * and the count is available.
-     * Value of -1 indicates that the count is unavailable.
+     * Return true if the current phone supports voice message count.
+     * and the count is available
      * Both CDMA and GSM phones support voice message count
      */
     public static boolean supportsVoiceMessageCount(Phone phone) {

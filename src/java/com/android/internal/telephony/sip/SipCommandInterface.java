@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2010 The Android Open Source Project
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- *
  * Not a Contribution.
+ * Copyright (C) 2010 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,7 +74,7 @@ class SipCommandInterface extends BaseCommands implements CommandsInterface {
     }
 
     @Override
-    public void supplyDepersonalization(String netpin, int type,  Message result) {
+    public void supplyDepersonalization(String netpin, String type,  Message result) {
     }
 
     @Override
@@ -546,12 +545,6 @@ class SipCommandInterface extends BaseCommands implements CommandsInterface {
     public void getVoiceRadioTechnology(Message result) {
     }
 
-    public boolean needsOldRilFeature(String feature) { return false; }
-
-    @Override
-    public void getDataCallProfile(int appType, Message result) {
-    }
-
     @Override
     public void getCellInfoList(Message result) {
     }
@@ -561,11 +554,9 @@ class SipCommandInterface extends BaseCommands implements CommandsInterface {
     }
 
     @Override
-    public void setUiccSubscription(int slotId, int appIndex, int subId, int subStatus,
-            Message response) {
+    public void setInitialAttachApn(String apn, String protocol, int authType, String username,
+            String password, Message result) {
     }
 
-    @Override
-    public void setDataSubscription(Message response) {
-    }
+    public boolean needsOldRilFeature(String feature) { return false; }
 }

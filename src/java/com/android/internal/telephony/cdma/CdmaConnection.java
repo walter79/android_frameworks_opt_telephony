@@ -93,6 +93,8 @@ public class CdmaConnection extends Connection {
     static final int WAKE_LOCK_TIMEOUT_MILLIS = 60*1000;
     static final int PAUSE_DELAY_MILLIS = 2 * 1000;
 
+    private boolean mConnTimerReset = false;
+
     //***** Inner Classes
 
     class MyHandler extends Handler {
@@ -245,6 +247,11 @@ public class CdmaConnection extends Connection {
     @Override
     public long getConnectTime() {
         return mConnectTime;
+    }
+
+    @Override
+    public void setConnectTime(long timeInMillis) {
+        mConnectTime = timeInMillis;
     }
 
     @Override
@@ -412,6 +419,10 @@ public class CdmaConnection extends Connection {
                 return DisconnectCause.CDMA_NOT_EMERGENCY;
             case CallFailCause.CDMA_ACCESS_BLOCKED:
                 return DisconnectCause.CDMA_ACCESS_BLOCKED;
+            case CallFailCause.EMERGENCY_TEMP_FAILURE:
+                return DisconnectCause.EMERGENCY_TEMP_FAILURE;
+            case CallFailCause.EMERGENCY_PERM_FAILURE:
+                return DisconnectCause.EMERGENCY_PERM_FAILURE;
             case CallFailCause.ERROR_UNSPECIFIED:
             case CallFailCause.NORMAL_CLEARING:
             default:
@@ -422,8 +433,13 @@ public class CdmaConnection extends Connection {
                 if (serviceState == ServiceState.STATE_POWER_OFF) {
                     return DisconnectCause.POWER_OFF;
                 } else if (serviceState == ServiceState.STATE_OUT_OF_SERVICE
-                        || serviceState == ServiceState.STATE_EMERGENCY_ONLY) {
-                    return DisconnectCause.OUT_OF_SERVICE;
+                        || phone.getServiceState().isEmergencyOnly()) {
+                    if (phone.getServiceState().isEmergencyOnly() &&
+                            causeCode == CallFailCause.NORMAL_CLEARING) {
+                        return DisconnectCause.NORMAL;
+                    } else {
+                        return DisconnectCause.OUT_OF_SERVICE;
+                    }
                 } else if (phone.mCdmaSubscriptionSource ==
                         CdmaSubscriptionSourceManager.SUBSCRIPTION_FROM_RUIM
                         && uiccAppState != AppState.APPSTATE_READY) {
@@ -947,5 +963,17 @@ public class CdmaConnection extends Connection {
     public UUSInfo getUUSInfo() {
         // UUS information not supported in CDMA
         return null;
+    }
+
+    void resetConnectionTimer() {
+        mConnectTime = System.currentTimeMillis();
+        mConnectTimeReal = SystemClock.elapsedRealtime();
+        mDuration = 0;
+        mConnTimerReset = true;
+        log("CdmaConnection time reseted");
+    }
+
+    public boolean isConnectionTimerReset() {
+        return mConnTimerReset;
     }
 }

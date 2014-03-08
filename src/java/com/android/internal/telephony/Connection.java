@@ -29,6 +29,10 @@ public abstract class Connection {
     protected String mCnapName;
     protected int mCnapNamePresentation  = PhoneConstants.PRESENTATION_ALLOWED;
 
+    public CallDetails callDetails = new CallDetails();
+    public CallModify callModifyRequest = null;
+    public String errorInfo;
+
     private static String LOG_TAG = "Connection";
 
     public enum DisconnectCause {
@@ -71,7 +75,15 @@ public abstract class Connection {
         CDMA_PREEMPTED,
         CDMA_NOT_EMERGENCY,              /* not an emergency call */
         CDMA_ACCESS_BLOCKED,            /* Access Blocked by CDMA network */
-        ERROR_UNSPECIFIED
+        EMERGENCY_TEMP_FAILURE,         /* EMERGENCY call failed with temporary fail cause */
+        EMERGENCY_PERM_FAILURE,         /* EMERGENCY call failed with permanent fail cause */
+        ERROR_UNSPECIFIED,
+        /* Ims Disconnect cause grouped from here */
+        SRVCC_CALL_DROP,                /* Call dropped because of SRVCC*/
+        ANSWERED_ELSEWHERE,             /* MT call has ended due to a release from the network
+                                         * because the call was answered elsewhere */
+
+        CALL_FAIL_MISC
     }
 
     Object mUserData;
@@ -116,7 +128,31 @@ public abstract class Connection {
      */
 
     public int getCnapNamePresentation() {
-       return mCnapNamePresentation;
+        return mCnapNamePresentation;
+    }
+
+    public CallDetails getCallDetails() {
+        return callDetails;
+    }
+
+    public CallModify getCallModify() {
+        return callModifyRequest;
+    }
+
+    public String getErrorInfo() {
+        return errorInfo;
+    }
+
+    public void setConnectionDetails(CallDetails ConnDetails) {
+        callDetails = ConnDetails;
+    }
+
+    public void setModifyConnectionDetails(CallModify modifyConn) {
+        callModifyRequest = modifyConn;
+    }
+
+    public void setErrorInfo(String errorInfo) {
+        errorInfo = errorInfo;
     }
 
     /**
@@ -139,6 +175,16 @@ public abstract class Connection {
      * Returns 0 before then.
      */
     public abstract long getConnectTime();
+
+    /**
+     * Set connection connect time in currentTimeMillis() format.
+     * This API may be used to change connect time of the
+     * Connection for scenarios like IMS Volte SRVCC where
+     * connect time is transferred from PS Connection to CS.
+     */
+    public void setConnectTime(long timeInMillis) {
+        Rlog.e(LOG_TAG, "setConnectTime() not implemented");
+    }
 
     /**
      * Disconnect time in currentTimeMillis() format.

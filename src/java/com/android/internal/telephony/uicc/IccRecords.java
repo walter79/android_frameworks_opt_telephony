@@ -65,7 +65,6 @@ public abstract class IccRecords extends Handler implements IccConstants {
     protected String mNewVoiceMailNum = null;
     protected String mNewVoiceMailTag = null;
     protected boolean mIsVoiceMailFixed = false;
-    protected int mCountVoiceMessages = 0;
     protected String mImsi;
 
     protected int mMncLength = UNINITIALIZED;
@@ -87,9 +86,8 @@ public abstract class IccRecords extends Handler implements IccConstants {
 
     // ***** Event Constants
     protected static final int EVENT_SET_MSISDN_DONE = 30;
-    public static final int EVENT_MWI = 0; // Message Waiting indication
-    public static final int EVENT_CFI = 1; // Call Forwarding indication
-    public static final int EVENT_SPN = 2; // Service Provider Name
+    public static final int EVENT_CFI = 0; // Call Forwarding indication
+    public static final int EVENT_SPN = 1; // Service Provider Name
 
 
     public static final int EVENT_GET_ICC_RECORD_DONE = 100;
@@ -120,7 +118,6 @@ public abstract class IccRecords extends Handler implements IccConstants {
                 + " newVoiceMailNum=" + mNewVoiceMailNum
                 + " newVoiceMailTag=" + mNewVoiceMailTag
                 + " isVoiceMailFixed=" + mIsVoiceMailFixed
-                + " countVoiceMessages=" + mCountVoiceMessages
                 + " mImsi=" + mImsi
                 + " mncLength=" + mMncLength
                 + " mailboxIndex=" + mMailboxIndex
@@ -256,16 +253,7 @@ public abstract class IccRecords extends Handler implements IccConstants {
      * @return null if SIM is not yet ready or unavailable
      */
     public String getIMSI() {
-        return null;
-    }
-
-    /**
-     * Imsi could be set by ServiceStateTrackers in case of cdma
-     * @param imsi
-     */
-    public void setImsi(String imsi) {
-        mImsi = imsi;
-        mImsiReadyRegistrants.notifyRegistrants();
+        return mImsi;
     }
 
     public String getMsisdnNumber() {
@@ -364,12 +352,10 @@ public abstract class IccRecords extends Handler implements IccConstants {
      *                     -1 to indicate that an unknown number of
      *                      messages are waiting
      */
-    public abstract void setVoiceMessageWaiting(int line, int countWaiting, Message onComplete );
+    public abstract void setVoiceMessageWaiting(int line, int countWaiting);
 
     /**
-     * Returns number of voice messages waiting, if available
-     * If not available (eg, on an older CPHS SIM) -1 is returned if
-     * getVoiceMessageWaiting() is true
+     * Called by GsmPhone to update VoiceMail count
      */
     public abstract int getVoiceMessageCount();
 
@@ -476,9 +462,8 @@ public abstract class IccRecords extends Handler implements IccConstants {
                     * desired power state has changed in the interim, we don't want to
                     * override it with an unconditional power on.
                     */
-                } else {
-                    mAdnCache.reset();
                 }
+                mAdnCache.reset();
                 //We will re-fetch the records when the app
                 // goes back to the ready state. Nothing to do here.
                 break;
@@ -538,15 +523,6 @@ public abstract class IccRecords extends Handler implements IccConstants {
      */
     public boolean getVoiceCallForwardingFlag() {
         return false;
-    }
-
-    /**
-     * Set the voice call forwarding flag for GSM/UMTS and the like SIMs
-     *
-     * @param line to enable/disable
-     * @param enable
-     */
-    public void setVoiceCallForwardingFlag(int line, boolean enable) {
     }
 
     /**
@@ -638,7 +614,6 @@ public abstract class IccRecords extends Handler implements IccConstants {
         pw.println(" mNewVoiceMailNum=" + mNewVoiceMailNum);
         pw.println(" mNewVoiceMailTag=" + mNewVoiceMailTag);
         pw.println(" mIsVoiceMailFixed=" + mIsVoiceMailFixed);
-        pw.println(" mCountVoiceMessages=" + mCountVoiceMessages);
         pw.println(" mImsi=" + mImsi);
         pw.println(" mMncLength=" + mMncLength);
         pw.println(" mMailboxIndex=" + mMailboxIndex);

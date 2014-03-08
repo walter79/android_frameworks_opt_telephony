@@ -33,8 +33,8 @@ public class CatCmdMessage implements Parcelable {
     private BrowserSettings mBrowserSettings = null;
     private ToneSettings mToneSettings = null;
     private CallSettings mCallSettings = null;
-    private boolean mLoadIconFailed = false;
     private SetupEventListSettings mSetupEventListSettings = null;
+    private boolean mLoadIconFailed = false;
 
     // Command Qualifier values for refresh command
     static final int REFRESH_NAA_INIT_AND_FULL_FILE_CHANGE  = 0x00;
@@ -137,7 +137,7 @@ public class CatCmdMessage implements Parcelable {
         mTextMsg = in.readParcelable(null);
         mMenu = in.readParcelable(null);
         mInput = in.readParcelable(null);
-        mLoadIconFailed = (Boolean)in.readValue(null);
+        mLoadIconFailed = (in.readByte() == 1);
         switch (getCmdType()) {
         case LAUNCH_BROWSER:
             mBrowserSettings = new BrowserSettings();
@@ -171,7 +171,7 @@ public class CatCmdMessage implements Parcelable {
         dest.writeParcelable(mTextMsg, 0);
         dest.writeParcelable(mMenu, 0);
         dest.writeParcelable(mInput, 0);
-        dest.writeValue(mLoadIconFailed);
+        dest.writeByte((byte) (mLoadIconFailed ? 1 : 0));
         switch(getCmdType()) {
         case LAUNCH_BROWSER:
             dest.writeString(mBrowserSettings.url);
@@ -238,6 +238,10 @@ public class CatCmdMessage implements Parcelable {
         return mCallSettings;
     }
 
+    public SetupEventListSettings getSetEventList() {
+        return mSetupEventListSettings;
+    }
+
     public boolean isRefreshResetOrInit() {
         if ((mCmdDet.commandQualifier == REFRESH_NAA_INIT_AND_FULL_FILE_CHANGE)
             || (mCmdDet.commandQualifier == REFRESH_NAA_INIT_AND_FILE_CHANGE )
@@ -248,16 +252,11 @@ public class CatCmdMessage implements Parcelable {
             return false;
         }
     }
-
     /**
      * API to be used by application to check if loading optional icon
      * has failed
      */
     public boolean hasIconLoadFailed() {
         return mLoadIconFailed;
-    }
-
-    public SetupEventListSettings getSetEventList() {
-        return mSetupEventListSettings;
     }
 }

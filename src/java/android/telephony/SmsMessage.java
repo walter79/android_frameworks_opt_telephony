@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2008 The Android Open Source Project
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- *
  * Not a Contribution.
+ * Copyright (C) 2008 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +36,7 @@ import static android.telephony.TelephonyManager.PHONE_TYPE_CDMA;
 
 /**
  * A Short Message Service message.
+ * @see android.provider.Telephony.Sms.Intents#getMessagesFromIntent
  */
 public class SmsMessage {
     private static final String LOG_TAG = "SmsMessage";

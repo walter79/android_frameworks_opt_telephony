@@ -1,7 +1,6 @@
 /*
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  * Not a Contribution.
- *
  * Copyright (C) 2010 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -66,25 +65,21 @@ public class ExtCallManager extends CallManager {
     private static final boolean DBG = true;
     private static final boolean VDBG = false;
 
-    private static final int EVENT_VOICE_SYSTEM_ID = 201;
     private static final int EVENT_LOCAL_CALL_HOLD = 202;
 
-    private static final String PROPERTY_VOICE_MODEM_INDEX = "persist.radio.voice.modem.index";
-    private static final int LOCAL_MODEM = 0;
-    private static final int REMOTE_MODEM = 1;
+    private static final int LOCAL_CALL_HOLD_INACTIVE = 0;
+    private static final int LOCAL_CALL_HOLD_ACTIVE = 1;
 
     // Holds the current active SUB, all actions would be
     // taken on this sub.
     private static int mActiveSub = 0;
 
-    // As of now VOICE3_VSID is not defined in AudioSystem,
-    // So for now using the VOICE2_VSID for sub3 on TSTS.
-    private long [] vsidVoiceDef = {AudioSystem.VOICE_VSID,
-            AudioSystem.VOICE2_VSID, AudioSystem.VOICE2_VSID};
-    private long [] vsidVoice= {-1, -1, -1};
-
     // Holds the LCH status of subscription
-    private int [] mLchStatus = {0, 0, 0};
+    private enum LchState {
+        INACTIVE,
+        ACTIVE
+    }
+    private LchState [] mLchStatus = {LchState.INACTIVE, LchState.INACTIVE, LchState.INACTIVE};
 
     private AudioManager mAudioManager = null;
 
@@ -259,11 +254,27 @@ public class ExtCallManager extends CallManager {
         return mActiveSub;
     }
 
-    // Update the local call hold state and sets audio parameters for
-    // LCH subscription
-    // 1 -- if call on local hold, 0 -- if call is not on local hold
-    private void updateLchStatus(int sub) {
-        int lchStatus = 0;
+    @Override
+    public boolean getLocalCallHoldStatus(int subscription) {
+        boolean status = false;
+
+        if ((subscription != MSimConstants.INVALID_SUBSCRIPTION) &&
+                (mLchStatus[subscription] != LchState.INACTIVE)) {
+            status = true;
+        }
+        return status;
+    }
+
+    /**
+     * Update the local call hold state and sets audio parameters for
+     * LCH subscription
+     * 1 -- if call on local hold, 0 -- if call is not on local hold
+     *
+     * @param sub to be updated
+     * @param reserveLchState true to retain the previous lch state; otherwise false
+     */
+    private void updateLchStatus(int sub, boolean reserveLchState) {
+        LchState lchStatus = LchState.INACTIVE;
         Phone offHookPhone = getFgPhone(sub);
         Call call = offHookPhone.getForegroundCall();
 
@@ -275,118 +286,36 @@ public class ExtCallManager extends CallManager {
         }
         Call.State state = call.getState();
 
-        if (((state == Call.State.ACTIVE) || (state == Call.State.DIALING)
-                || (state == Call.State.ALERTING)) && (sub != getActiveSubscription())) {
-            // if sub is not an active sub and if it has an active
-            // voice call then update lchStatus as 1
-            lchStatus = 1;
+        if ((state == Call.State.ACTIVE) || (state == Call.State.DIALING) ||
+                (state == Call.State.HOLDING) || (state == Call.State.ALERTING)) {
+            if (sub != getActiveSubscription()) {
+                // if sub is not an active sub and if it has an active
+                // voice call then update lchStatus as Active
+                lchStatus = LchState.ACTIVE;
+            } else if (reserveLchState == true){
+                // otherwise don't change the lch status unless we really want to
+                lchStatus = mLchStatus[sub];
+            }
         }
         // Update state only if the new state is different
         if (lchStatus != mLchStatus[sub]) {
             Rlog.d(LOG_TAG, " setLocal Call Hold to  = " + lchStatus);
-
-            if (getActiveSubscription() != sub) {
-                Rlog.d(LOG_TAG, "Set parameters for Lch sub = " + sub);
-                setAudioParameters(sub);
-            }
-            offHookPhone.setLocalCallHold(lchStatus, mHandler.obtainMessage(EVENT_LOCAL_CALL_HOLD));
+            offHookPhone.setLocalCallHold(
+                    (lchStatus == LchState.ACTIVE)?LOCAL_CALL_HOLD_ACTIVE: LOCAL_CALL_HOLD_INACTIVE,
+                    mHandler.obtainMessage(EVENT_LOCAL_CALL_HOLD));
             mLchStatus[sub] = lchStatus;
         }
     }
 
-    private void setAudioStateParam(long vsid, int state) {
-        if (mAudioManager == null) {
-            Rlog.e(LOG_TAG, " Audio Service is null!! ");
-            return;
-        }
-        String keyValPairs = new String(AudioManager.VSID_KEY + "=" + vsid + ";"
-                + AudioManager.CALL_STATE_KEY + "=" + state);
-
-        Rlog.d(LOG_TAG, "Setting audio state to: " + keyValPairs);
-
-        mAudioManager.setParameters(keyValPairs);
+    private void updateLchStatus(int sub) {
+        // set reserveLchState to true to reserve the lch state
+        updateLchStatus(sub, true);
     }
 
-    private int getAudioStateFromCallState(int sub, Call.State state) {
-        int callState = AudioManager.CALL_INACTIVE;
-        if ((state == Call.State.ACTIVE) || (state == Call.State.DIALING)
-                || (state == Call.State.ALERTING)) {
-            if (sub == getActiveSubscription()) {
-                callState = AudioManager.CALL_ACTIVE;
-            } else {
-                callState = AudioManager.CALL_LOCAL_HOLD;
-            }
-        } else if (state == Call.State.HOLDING) {
-            if (sub == getActiveSubscription()) {
-                callState = AudioManager.CALL_HOLD;
-            } else {
-                callState = AudioManager.CALL_LOCAL_HOLD;
-            }
-        } else {
-            callState = AudioManager.CALL_INACTIVE;
-        }
-        return callState;
-    }
-
-    private int getAudioCallState(Call call) {
-        Call.State state = call.getState();
-        int sub = call.getPhone().getSubscription();
-        return getAudioStateFromCallState(sub, state);
-    }
-
-    private long getVsid(Phone offHookPhone, int sub) {
-        long vsid = 0;
-
-        switch(offHookPhone.getPhoneType()) {
-            case PhoneConstants.PHONE_TYPE_SIP:
-                //TODO VSID type for SIP phone ? and callStat for SIP phone ??
-                //vsid = ??;
-                Rlog.d(LOG_TAG, "getVsid for SIP");
-                break;
-            case PhoneConstants.PHONE_TYPE_IMS:
-                vsid = AudioManager.IMS_VSID;
-                Rlog.d(LOG_TAG, "getVsid for IMS");
-                break;
-            default:
-                int voiceModemIndex = LOCAL_MODEM;
-
-                if (sBaseband.equals(SGLTE) || sBaseband.equals(SGLTE_TYPE2)) {
-                    voiceModemIndex =
-                            SystemProperties.getInt(PROPERTY_VOICE_MODEM_INDEX, LOCAL_MODEM);
-                }
-
-                if (vsidVoice[sub] == -1) {
-                    vsidVoice[sub] = vsidVoiceDef[voiceModemIndex];
-                }
-                Rlog.d(LOG_TAG, "getVsid modem index " + voiceModemIndex
-                        + " vsid = " + vsidVoice[sub] + "sub = " + sub);
-                vsid = vsidVoice[sub];
-                break;
-        }
-        return vsid;
-    }
-
-    private void setAudioParameters(int sub) {
-        long vsid = 0;
-        int newCallState = AudioManager.CALL_INACTIVE;
-
-        for (Phone phone : mPhones) {
-            if (phone.getSubscription() == sub) {
-                Call call = phone.getForegroundCall();
-
-                if (call.isIdle()) {
-                    // There is no active Fg calls, the OFFHOOK state
-                    // is set by the Bg call. So set the phone to bgPhone.
-                    call = phone.getBackgroundCall();
-                }
-
-                newCallState = getAudioCallState(call);
-                vsid = getVsid(phone, sub);
-
-                Rlog.d(LOG_TAG, "setAudioParams callstate=" + newCallState + " vsid = " + vsid);
-                setAudioStateParam(vsid, newCallState);
-            }
-        }
+    @Override
+    public void deactivateLchState(int sub) {
+        Rlog.d(LOG_TAG, "Deactivating Sub" + sub + "'s Lch state.");
+        updateLchStatus(sub, false);
     }
 
     @Override
@@ -401,15 +330,22 @@ public class ExtCallManager extends CallManager {
         switch (getState()) {
             case RINGING:
                 if (VDBG) Rlog.d(LOG_TAG, "setAudioMode RINGING");
-                if (mAudioManager.getMode() != AudioManager.MODE_RINGTONE) {
+                int curAudioMode = mAudioManager.getMode();
+                if (curAudioMode != AudioManager.MODE_RINGTONE) {
                     // only request audio focus if the ringtone is going to be heard
                     if (mAudioManager.getStreamVolume(AudioManager.STREAM_RING) > 0) {
                         Rlog.d(LOG_TAG, "requestAudioFocus on STREAM_RING");
                         mAudioManager.requestAudioFocusForCall(AudioManager.STREAM_RING,
                                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
                     }
-                    mAudioManager.setMode(AudioManager.MODE_RINGTONE);
-                    if (DBG) Rlog.d(LOG_TAG, "setAudioMode RINGING");
+                    if (!mSpeedUpAudioForMtCall) {
+                        if (DBG) Rlog.d(LOG_TAG, "setAudioMode RINGING");
+                        mAudioManager.setMode(AudioManager.MODE_RINGTONE);
+                    }
+                }
+                if (mSpeedUpAudioForMtCall && (curAudioMode != AudioManager.MODE_IN_CALL)) {
+                    if (DBG) Rlog.d(LOG_TAG, "setAudioMode IN_CALL");
+                    mAudioManager.setMode(AudioManager.MODE_IN_CALL);
                 }
                 break;
             case OFFHOOK:
@@ -417,7 +353,6 @@ public class ExtCallManager extends CallManager {
                     // First put the calls on other SUB in LCH.
                     updateLchStatus(sub);
                 }
-                setAudioParameters(getActiveSubscription());
 
                 Phone offHookPhone = getFgPhone();
                 int newAudioMode = AudioManager.MODE_IN_CALL;
@@ -432,7 +367,7 @@ public class ExtCallManager extends CallManager {
                 if (VDBG) Rlog.d(LOG_TAG, "setAudioMode OFFHOOK mode=" + newAudioMode);
                 //Need to discuss with Linux audio on getMode per sub capability?
                 int currMode = mAudioManager.getMode();
-                if (currMode != newAudioMode) {
+                if (currMode != newAudioMode || mSpeedUpAudioForMtCall) {
                     // request audio focus before setting the new mode
                     mAudioManager.requestAudioFocusForCall(AudioManager.STREAM_VOICE_CALL,
                            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
@@ -440,11 +375,11 @@ public class ExtCallManager extends CallManager {
                             + currMode + " to " + newAudioMode);
                     mAudioManager.setMode(newAudioMode);
                 }
+                mSpeedUpAudioForMtCall = false;
                 break;
             case IDLE:
                 if (VDBG) Rlog.d(LOG_TAG, "in setAudioMode before setmode IDLE");
                 if (mAudioManager.getMode() != AudioManager.MODE_NORMAL) {
-                    setAudioParameters(getActiveSubscription());
                     for (int sub = 0; sub < MSimTelephonyManager.getDefault().getPhoneCount();
                             sub++) {
                         updateLchStatus(sub);
@@ -455,43 +390,10 @@ public class ExtCallManager extends CallManager {
                     // abandon audio focus after the mode has been set back to normal
                     mAudioManager.abandonAudioFocusForCall();
                 }
+                mSpeedUpAudioForMtCall = false;
                 break;
         }
         Rlog.d(LOG_TAG, "setAudioMode State = " + getState());
-    }
-
-    /**
-     * Set Voice call Drivers based on phone type and call state
-     */
-    @Override
-    public void setCallAudioDrivers(int phoneType, Call.State state) {
-        Rlog.d(LOG_TAG, "setCallAudioDrivers for " + phoneType + "state = " + state);
-        if (phoneType == PhoneConstants.PHONE_TYPE_NONE) {
-            phoneType = PhoneFactory.getDefaultPhone().getPhoneType();
-        }
-        for (Phone phone : mPhones) {
-            if (phone.getPhoneType() == phoneType) {
-                long vsid = getVsid(phone, phone.getSubscription());
-                setAudioStateParam(vsid,
-                        getAudioStateFromCallState(phone.getSubscription(), state));
-                break;
-            }
-        }
-    }
-
-    @Override
-    protected void registerForPhoneStates(Phone phone) {
-        super.registerForPhoneStates(phone);
-
-        phone.registerForUnsolVoiceSystemId(mHandler, EVENT_VOICE_SYSTEM_ID,
-                phone.getSubscription());
-    }
-
-    @Override
-    protected void unregisterForPhoneStates(Phone phone) {
-        super.unregisterForPhoneStates(phone);
-
-        phone.unregisterForUnsolVoiceSystemId(mHandler);
     }
 
     /**
@@ -500,7 +402,7 @@ public class ExtCallManager extends CallManager {
      * @return subscription which is active.
      */
     public int getOtherActiveSub(int subscription) {
-        int otherSub = -1;
+        int otherSub = MSimConstants.INVALID_SUBSCRIPTION;;
         int count = MSimTelephonyManager.getDefault().getPhoneCount();
 
         Rlog.d(LOG_TAG, "is other sub active = " + subscription + count);
@@ -515,16 +417,32 @@ public class ExtCallManager extends CallManager {
         return otherSub;
     }
 
-    @Override
-    public void switchToLocalHold(int subscription, boolean switchTo) {
-        Phone activePhone = null;
-        Phone heldPhone = null;
+    public void updateLchOnOtherSub(int subscription) {
+        Phone bgPhone = null;
+        int otherActiveSub = getOtherActiveSub(subscription);
 
-        Rlog.d(LOG_TAG, " switchToLocalHold update audio state");
-        setAudioMode();
+        Rlog.d(LOG_TAG, " updateLchOnOtherSub subscription: " + subscription);
+        if (otherActiveSub != MSimConstants.INVALID_SUBSCRIPTION) {
+            if (getActiveFgCallState(otherActiveSub) == Call.State.IDLE) {
+                // if there is active bg call, set the phone to bgPhone.
+                if (hasActiveBgCall(otherActiveSub)) {
+                    bgPhone = getBgPhone(otherActiveSub);
+                }
+            } else {
+                bgPhone = getFgPhone(otherActiveSub);
+            }
 
-        //TODO Inform LCH sub to modem
+            // Update state only if the new state is different
+            if ((LchState.ACTIVE != mLchStatus[otherActiveSub]) &&
+                    (bgPhone != null)) {
+                Rlog.d(LOG_TAG, " setLocal Call Hold on sub: " + otherActiveSub);
+                bgPhone.setLocalCallHold(LOCAL_CALL_HOLD_ACTIVE,
+                        mHandler.obtainMessage(EVENT_LOCAL_CALL_HOLD));
+                mLchStatus[otherActiveSub] = LchState.ACTIVE;
+            }
+        }
     }
+
 
     /**
      * Whether or not the phone can conference in the current phone
@@ -582,6 +500,14 @@ public class ExtCallManager extends CallManager {
         }
     }
 
+
+    @Override
+    public void acceptCall(Call ringingCall, int callType) throws CallStateException {
+        updateLchOnOtherSub(ringingCall.getPhone().getSubscription());
+        super.acceptCall(ringingCall, callType);
+    }
+
+
     /**
      * Initiate a new voice connection. This happens asynchronously, so you
      * cannot assume the audio path is connected (or a call index has been
@@ -595,7 +521,88 @@ public class ExtCallManager extends CallManager {
     @Override
     public Connection dial(Phone phone, String dialString, int callType, String[] extras)
             throws CallStateException {
-        return super.dial(phone, dialString, callType, extras);
+        Phone basePhone = getPhoneBase(phone);
+        int subscription = phone.getSubscription();
+        Connection result;
+        mDialString = dialString;
+
+        if (VDBG) {
+            Rlog.d(LOG_TAG, " dial(" + basePhone + ", "+ dialString + ")" +
+                    " subscription = " + subscription);
+            Rlog.d(LOG_TAG, toString());
+        }
+
+        if (!canDial(phone)) {
+            throw new CallStateException("cannot dial in current state");
+        }
+
+        if (hasActiveFgCall(subscription)) {
+            Phone activePhone = getActiveFgCall(subscription).getPhone();
+            boolean hasBgCall = !(activePhone.getBackgroundCall().isIdle());
+
+            if (DBG) {
+                Rlog.d(LOG_TAG, "hasBgCall: "+ hasBgCall + " sameChannel:"
+                        + (activePhone == basePhone));
+            }
+
+            if (activePhone != basePhone) {
+                if (hasBgCall) {
+                    Rlog.d(LOG_TAG, "Hangup");
+                    getActiveFgCall(subscription).hangup();
+                } else {
+                    Rlog.d(LOG_TAG, "Switch");
+                    activePhone.switchHoldingAndActive();
+                }
+            }
+        }
+
+        updateLchOnOtherSub(subscription);
+
+        if (phone.getPhoneType() == PhoneConstants.PHONE_TYPE_IMS) {
+            result = basePhone.dial(dialString, callType, extras);
+        } else {
+            result = basePhone.dial(dialString);
+        }
+
+        if (VDBG) {
+            Rlog.d(LOG_TAG, "End dial(" + basePhone + ", "+ dialString + ")");
+            Rlog.d(LOG_TAG, toString());
+        }
+        return result;
+    }
+
+    @Override
+    protected boolean canDial(Phone phone) {
+        int serviceState = phone.getServiceState().getState();
+        int subscription = phone.getSubscription();
+        boolean hasRingingCall = hasActiveRingingCallOnAnySub();
+        Call.State fgCallState = getActiveFgCallState(subscription);
+
+        boolean result = (serviceState != ServiceState.STATE_POWER_OFF
+                && !hasRingingCall
+                && ((fgCallState == Call.State.ACTIVE)
+                    || (fgCallState == Call.State.IDLE)
+                    /*As per 3GPP TS 51.010-1 section 31.13.1.4
+                    call should be alowed when the foreground
+                    call is in ALERTING state*/
+                    || ((fgCallState == Call.State.ALERTING) &&
+                            isExplicitCallTransferMMI(mDialString))
+                    || (fgCallState == Call.State.DISCONNECTED)));
+
+        if (result == false) {
+            Rlog.d(LOG_TAG, "canDial serviceState=" + serviceState
+                            + " hasRingingCall=" + hasRingingCall
+                            + " fgCallState=" + fgCallState);
+        }
+        return result;
+    }
+
+    /**
+     * Return true if there is ringing call on any subscription,
+     * else return false
+     */
+    public boolean hasActiveRingingCallOnAnySub() {
+        return super.hasActiveRingingCall();
     }
 
     @Override
@@ -634,18 +641,6 @@ public class ExtCallManager extends CallManager {
         }
 
         return (heldPhone == activePhone && activePhone.canTransfer());
-    }
-
-    private void handleEventVoiceSysId(Message msg) {
-        AsyncResult ar;
-        int sub = -1;
-
-        ar = (AsyncResult)msg.obj;
-        sub = (Integer)(ar.userObj);
-        if (ar.result != null && sub != -1) {
-            vsidVoice[sub] = ((Integer) (ar.result)).longValue();
-            Rlog.d(LOG_TAG, "Voice System ID:" + vsidVoice[sub] + " sub = " + sub);
-        }
     }
 
     /**
@@ -1005,10 +1000,6 @@ public class ExtCallManager extends CallManager {
                     } else {
                         mNewRingingConnectionRegistrants.notifyRegistrants((AsyncResult) msg.obj);
                     }
-                    break;
-                case EVENT_VOICE_SYSTEM_ID:
-                    if (VDBG) Rlog.d(LOG_TAG, " handleMessage (EVENT_VOICE_SYSTEM_ID)");
-                    handleEventVoiceSysId(msg);
                     break;
                 case EVENT_LOCAL_CALL_HOLD:
                     if (VDBG) Rlog.d(LOG_TAG, " handleMessage (EVENT_LOCAL_CALL_HOLD)");

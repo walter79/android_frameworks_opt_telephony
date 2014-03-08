@@ -1,7 +1,8 @@
 /*
- * Copyright (C) 2006 The Android Open Source Project
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  * Not a Contribution.
+ *
+ * Copyright (C) 2006 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,6 +54,7 @@ import static com.android.internal.telephony.CommandsInterface.CF_REASON_UNCONDI
 import static com.android.internal.telephony.CommandsInterface.SERVICE_CLASS_VOICE;
 import static com.android.internal.telephony.TelephonyProperties.PROPERTY_BASEBAND_VERSION;
 
+import com.android.internal.telephony.SmsBroadcastUndelivered;
 import com.android.internal.telephony.dataconnection.DcTracker;
 import com.android.internal.telephony.CallForwardInfo;
 import com.android.internal.telephony.CallStateException;
@@ -104,9 +106,9 @@ public class GSMPhone extends PhoneBase {
     public static final String VM_NUMBER = "vm_number_key";
     // Key used to read/write the SIM IMSI used for storing the voice mail
     public static final String VM_SIM_IMSI = "vm_sim_imsi_key";
-
     // Key used to read/write if Call Forwarding is enabled
     public static final String CF_ENABLED = "cf_enabled_key";
+
     // Event constant for checking if Call Forwarding is enabled
     private static final int CHECK_CALLFORWARDING_STATUS = 75;
 
@@ -132,10 +134,16 @@ public class GSMPhone extends PhoneBase {
     // Create Cfu (Call forward unconditional) so that dialling number &
     // mOnComplete (Message object passed by client) can be packed &
     // given as a single Cfu object as user data to RIL.
-    private class Cfu {
-        String mSetCfNumber;
-        Message mOnComplete;
+    private static class Cfu {
+        final String mSetCfNumber;
+        final Message mOnComplete;
+
+        Cfu(String cfNumber, Message onComplete) {
+            mSetCfNumber = cfNumber;
+            mOnComplete = onComplete;
+        }
     }
+
     // Constructors
 
     public
@@ -233,7 +241,6 @@ public class GSMPhone extends PhoneBase {
             mCi.unSetOnUSSD(this);
             mCi.unSetOnSuppServiceNotification(this);
             mCi.unSetOnUSSD(this);
-            mCi.unSetOnSuppServiceNotification(this);
             mCi.unSetOnSs(this);
 
             mPendingMMIs.clear();
@@ -242,7 +249,9 @@ public class GSMPhone extends PhoneBase {
             mCT.dispose();
             mDcTracker.dispose();
             mSST.dispose();
-            mSimPhoneBookIntManager.dispose();
+            if (mSimPhoneBookIntManager != null) {
+                mSimPhoneBookIntManager.dispose();
+            }
             mSubInfo.dispose();
         }
     }
@@ -267,7 +276,12 @@ public class GSMPhone extends PhoneBase {
     @Override
     public ServiceState
     getServiceState() {
-        return mSST.mSS;
+        if (mSST != null) {
+            return mSST.mSS;
+        } else {
+            // avoid potential NPE in EmergencyCallHelper during Phone switch
+            return new ServiceState();
+        }
     }
 
     @Override
@@ -306,6 +320,7 @@ public class GSMPhone extends PhoneBase {
         if (countVoiceMessages == 0) {
             countVoiceMessages = getStoredVoiceMessageCount();
         }
+        Rlog.d(LOG_TAG, "updateVoiceMail countVoiceMessages = " + countVoiceMessages);
         setVoiceMessageCount(countVoiceMessages);
     }
 
@@ -320,7 +335,6 @@ public class GSMPhone extends PhoneBase {
         }
         return cf;
     }
-
     @Override
     public List<? extends MmiCode>
     getPendingMmiCodes() {
@@ -803,7 +817,7 @@ public class GSMPhone extends PhoneBase {
     public boolean handlePinMmi(String dialString) {
         GsmMmiCode mmi = GsmMmiCode.newFromDialString(dialString, this, mUiccApplication.get());
 
-        if (mmi != null && mmi.isPinCommand()) {
+        if (mmi != null && mmi.isPinPukCommand()) {
             mPendingMMIs.add(mmi);
             mMmiRegistrants.notifyRegistrants(new AsyncResult(null, mmi, null));
             mmi.processCode();
@@ -1043,9 +1057,7 @@ public class GSMPhone extends PhoneBase {
 
             Message resp;
             if (commandInterfaceCFReason == CF_REASON_UNCONDITIONAL) {
-                Cfu cfu = new Cfu();
-                cfu.mSetCfNumber = dialingNumber;
-                cfu.mOnComplete = onComplete;
+                Cfu cfu = new Cfu(dialingNumber, onComplete);
                 resp = obtainMessage(EVENT_SET_CALL_FORWARD_DONE,
                         isCfEnable(commandInterfaceCFAction) ? 1 : 0, 0, cfu);
             } else {
@@ -1135,7 +1147,12 @@ public class GSMPhone extends PhoneBase {
         // get the message
         Message msg = obtainMessage(EVENT_SET_NETWORK_MANUAL_COMPLETE, nsm);
 
-        mCi.setNetworkSelectionModeManual(network.getOperatorNumeric(), msg);
+        if (network.getRadioTech().equals("")) {
+            mCi.setNetworkSelectionModeManual(network.getOperatorNumeric(), msg);
+        } else {
+            mCi.setNetworkSelectionModeManual(network.getOperatorNumeric()
+                    + "+" + network.getRadioTech(), msg);
+        }
     }
 
     @Override
@@ -1212,7 +1229,7 @@ public class GSMPhone extends PhoneBase {
      * @param enabled
      */
     protected void setCallForwardingPreference(boolean enabled) {
-        Rlog.d(LOG_TAG, "Set callforwarding info to perferences");
+        if (LOCAL_DEBUG) Rlog.d(LOG_TAG, "Set callforwarding info to perferences");
         SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(mContext);
         SharedPreferences.Editor edit = sp.edit();
         edit.putBoolean(CF_ENABLED, enabled);
@@ -1223,7 +1240,7 @@ public class GSMPhone extends PhoneBase {
     }
 
     protected boolean getCallForwardingPreference() {
-        Rlog.d(LOG_TAG, "Get callforwarding info from perferences");
+        if (LOCAL_DEBUG) Rlog.d(LOG_TAG, "Get callforwarding info from perferences");
 
         SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(mContext);
         boolean cf = sp.getBoolean(CF_ENABLED, false);
@@ -1235,11 +1252,11 @@ public class GSMPhone extends PhoneBase {
      * sent so we can check if the CF status is stored as a Shared Preference.
      */
     private void updateCallForwardStatus() {
-        Rlog.d(LOG_TAG, "updateCallForwardStatus got sim records");
+        if (LOCAL_DEBUG) Rlog.d(LOG_TAG, "updateCallForwardStatus got sim records");
         IccRecords r = mIccRecords.get();
         if (r != null && r.isCallForwardStatusStored()) {
             // The Sim card has the CF info
-            Rlog.d(LOG_TAG, "Callforwarding info is present on sim");
+            if (LOCAL_DEBUG) Rlog.d(LOG_TAG, "Callforwarding info is present on sim");
             notifyCallForwardingIndicator();
         } else {
             Message msg = obtainMessage(CHECK_CALLFORWARDING_STATUS);
@@ -1344,7 +1361,7 @@ public class GSMPhone extends PhoneBase {
                 updateCurrentCarrierInProvider();
 
                 // Check if this is a different SIM than the previous one. If so unset the
-                // voice mail number.
+                // voice mail number and the call forwarding flag.
                 String imsi = getVmSimImsi();
                 String imsiFromSIM = getSubscriberId();
                 if (imsi != null && imsiFromSIM != null && !imsiFromSIM.equals(imsi)) {
@@ -1352,9 +1369,10 @@ public class GSMPhone extends PhoneBase {
                     setCallForwardingPreference(false);
                     setVmSimImsi(null);
                 }
-                updateVoiceMail();
+
                 updateCallForwardStatus();
                 mSimRecordsLoadedRegistrants.notifyRegistrants();
+                updateVoiceMail();
             break;
 
             case EVENT_GET_BASEBAND_VERSION_DONE:
@@ -1508,7 +1526,7 @@ public class GSMPhone extends PhoneBase {
 
             case CHECK_CALLFORWARDING_STATUS:
                 boolean cfEnabled = getCallForwardingPreference();
-                Rlog.d(LOG_TAG, "Callforwarding is " + cfEnabled);
+                if (LOCAL_DEBUG) Rlog.d(LOG_TAG, "Callforwarding is " + cfEnabled);
                 if (cfEnabled) {
                     notifyCallForwardingIndicator();
                 }
@@ -1527,6 +1545,10 @@ public class GSMPhone extends PhoneBase {
     @Override
     protected void setCardInPhoneBook() {
         if (mUiccController == null ) {
+            return;
+        }
+
+        if (mSimPhoneBookIntManager == null) {
             return;
         }
 
@@ -1568,9 +1590,6 @@ public class GSMPhone extends PhoneBase {
         switch (eventCode) {
             case IccRecords.EVENT_CFI:
                 notifyCallForwardingIndicator();
-                break;
-            case IccRecords.EVENT_MWI:
-                notifyMessageWaitingIndicator();
                 break;
         }
     }
@@ -1653,7 +1672,7 @@ public class GSMPhone extends PhoneBase {
             if (infos == null || infos.length == 0) {
                 // Assume the default is not active
                 // Set unconditional CFF in SIM to false
-                r.setVoiceCallForwardingFlag(1, false);
+                r.setVoiceCallForwardingFlag(1, false, null);
             } else {
                 for (int i = 0, s = infos.length; i < s; i++) {
                     if ((infos[i].serviceClass & SERVICE_CLASS_VOICE) != 0) {
@@ -1862,6 +1881,23 @@ public class GSMPhone extends PhoneBase {
             Rlog.d(LOG_TAG, "Voice Mail Count from preference = " + countVoiceMessages );
         }
         return countVoiceMessages;
+    }
+
+     /**
+     * Sets the SIM voice message waiting indicator records.
+     * @param line GSM Subscriber Profile Number, one-based. Only '1' is supported
+     * @param countWaiting The number of messages waiting, if known. Use
+     *                     -1 to indicate that an unknown number of
+     *                      messages are waiting
+     */
+    @Override
+    public void setVoiceMessageWaiting(int line, int countWaiting) {
+        IccRecords r = mIccRecords.get();
+        if (r != null) {
+            r.setVoiceMessageWaiting(line, countWaiting);
+        } else {
+            log("SIM Records not found, MWI not updated");
+        }
     }
 
 }

@@ -1,10 +1,9 @@
 /*
  * Copyright (c) 2012-13, The Linux Foundation. All rights reserved.
- * Not a Contribution.
+ * Not a Contribution, Apache license notifications and license are retained
+ * for attribution purposes only.
  *
  * Copyright (C) 2007 The Android Open Source Project
- * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- * Not a Contribution.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,11 +34,13 @@ import android.os.RegistrantList;
 import android.os.SystemProperties;
 import android.preference.PreferenceManager;
 import android.provider.Settings;
+import android.telephony.CellIdentityCdma;
 import android.telephony.CellInfo;
+import android.telephony.CellInfoCdma;
+import android.telephony.Rlog;
 import android.telephony.ServiceState;
 import android.telephony.SignalStrength;
 import android.text.TextUtils;
-import android.telephony.Rlog;
 
 import com.android.internal.R;
 import com.android.internal.telephony.dataconnection.DcTrackerBase;
@@ -51,10 +52,11 @@ import com.android.internal.telephony.uicc.IsimRecords;
 import com.android.internal.telephony.uicc.UiccCardApplication;
 import com.android.internal.telephony.uicc.UiccController;
 import com.android.internal.telephony.uicc.UsimServiceTable;
+
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -131,13 +133,13 @@ public abstract class PhoneBase extends Handler implements Phone {
     // Key used to read/write current CLIR setting
     public static final String CLIR_KEY = "clir_key";
 
-    // Key used to read/write "disable DNS server check" pref (used for testing)
-    public static final String DNS_SERVER_CHECK_DISABLED_KEY = "dns_server_check_disabled_key";
-
     // Key used for storing voice mail count
     public static final String VM_COUNT = "vm_count_key";
     // Key used to read/write the ID for storing the voice mail
     public static final String VM_ID = "vm_id_key";
+
+    // Key used to read/write "disable DNS server check" pref (used for testing)
+    public static final String DNS_SERVER_CHECK_DISABLED_KEY = "dns_server_check_disabled_key";
 
     //Telephony System Property used to indicate a multimode target
     public static final String PROPERTY_MULTIMODE_CDMA = "ro.config.multimode_cdma";
@@ -193,7 +195,7 @@ public abstract class PhoneBase extends Handler implements Phone {
 
     // Flag that indicates that Out Of Service is considered as data call disconnect
     protected boolean mOosIsDisconnect = SystemProperties.getBoolean(
-            PROPERTY_OOS_IS_DISCONNECT, true);
+            PROPERTY_OOS_IS_DISCONNECT, false);
 
     /**
      * Set a system property, unless we're in unit test mode
@@ -694,16 +696,6 @@ public abstract class PhoneBase extends Handler implements Phone {
     }
 
     @Override
-    public void registerForUnsolVoiceSystemId(Handler h, int what, Object obj) {
-        mCi.registerForUnsolVoiceSystemId(h,what,obj);
-    }
-
-    @Override
-    public void unregisterForUnsolVoiceSystemId(Handler h) {
-        mCi.unregisterForUnsolVoiceSystemId(h);
-    }
-
-    @Override
     public void setEchoSuppressionEnabled(boolean enabled) {
         // no need for regular phone
     }
@@ -804,6 +796,16 @@ public abstract class PhoneBase extends Handler implements Phone {
         return this;
     }
 
+    @Override
+    public void updatePhoneObject(int voiceRadioTech) {
+        if (mUnitTestMode) {
+            // PhoneFactory isn't initialized in unit test mode
+            return;
+        }
+        // Only the PhoneProxy can update the phone object.
+        PhoneFactory.getDefaultPhone().updatePhoneObject(voiceRadioTech);
+    }
+
     /**
     * Retrieves the ServiceStateTracker of the phone instance.
     */
@@ -849,7 +851,40 @@ public abstract class PhoneBase extends Handler implements Phone {
      */
     @Override
     public List<CellInfo> getAllCellInfo() {
-        return getServiceStateTracker().getAllCellInfo();
+        List<CellInfo> cellInfoList = getServiceStateTracker().getAllCellInfo();
+        return privatizeCellInfoList(cellInfoList);
+    }
+
+    /**
+     * Clear CDMA base station lat/long values if location setting is disabled.
+     * @param cellInfoList the original cell info list from the RIL
+     * @return the original list with CDMA lat/long cleared if necessary
+     */
+    private List<CellInfo> privatizeCellInfoList(List<CellInfo> cellInfoList) {
+        int mode = Settings.Secure.getInt(getContext().getContentResolver(),
+                Settings.Secure.LOCATION_MODE, Settings.Secure.LOCATION_MODE_OFF);
+        if (mode == Settings.Secure.LOCATION_MODE_OFF) {
+            ArrayList<CellInfo> privateCellInfoList = new ArrayList<CellInfo>(cellInfoList.size());
+            // clear lat/lon values for location privacy
+            for (CellInfo c : cellInfoList) {
+                if (c instanceof CellInfoCdma) {
+                    CellInfoCdma cellInfoCdma = (CellInfoCdma) c;
+                    CellIdentityCdma cellIdentity = cellInfoCdma.getCellIdentity();
+                    CellIdentityCdma maskedCellIdentity = new CellIdentityCdma(
+                            cellIdentity.getNetworkId(),
+                            cellIdentity.getSystemId(),
+                            cellIdentity.getBasestationId(),
+                            Integer.MAX_VALUE, Integer.MAX_VALUE);
+                    CellInfoCdma privateCellInfoCdma = new CellInfoCdma(cellInfoCdma);
+                    privateCellInfoCdma.setCellIdentity(maskedCellIdentity);
+                    privateCellInfoList.add(privateCellInfoCdma);
+                } else {
+                    privateCellInfoList.add(c);
+                }
+            }
+            cellInfoList = privateCellInfoList;
+        }
+        return cellInfoList;
     }
 
     /**
@@ -1013,7 +1048,7 @@ public abstract class PhoneBase extends Handler implements Phone {
     }
 
     public void notifyCellInfo(List<CellInfo> cellInfo) {
-        mNotifier.notifyCellInfo(this, cellInfo);
+        mNotifier.notifyCellInfo(this, privatizeCellInfoList(cellInfo));
     }
 
     /**
@@ -1038,7 +1073,7 @@ public abstract class PhoneBase extends Handler implements Phone {
     /** @hide */
     /** @return number of voicemails */
     @Override
-    public int getVoiceMessageCount() {
+    public int getVoiceMessageCount(){
         return mVmCount;
     }
 
@@ -1343,7 +1378,7 @@ public abstract class PhoneBase extends Handler implements Phone {
 
     public boolean isManualNetSelAllowed() {
         // This function should be overridden in GsmPhone.
-        // Not implemented in CdmaPhone and SIPPhone.
+        // Not implemented by default.
         return false;
     }
 
@@ -1421,6 +1456,19 @@ public abstract class PhoneBase extends Handler implements Phone {
     }
 
     /**
+     * Sets the SIM voice message waiting indicator records.
+     * @param line GSM Subscriber Profile Number, one-based. Only '1' is supported
+     * @param countWaiting The number of messages waiting, if known. Use
+     *                     -1 to indicate that an unknown number of
+     *                      messages are waiting
+     */
+    @Override
+    public void setVoiceMessageWaiting(int line, int countWaiting) {
+        // This function should be overridden by class GSMPhone and CDMAPhone.
+        Rlog.e(LOG_TAG, "Error! This function should never be executed, inactive Phone.");
+    }
+
+    /**
      * Gets the USIM service table from the UICC, if present and available.
      * @return an interface to the UsimServiceTable record, or null if not available
      */
@@ -1481,6 +1529,11 @@ public abstract class PhoneBase extends Handler implements Phone {
         logUnexpectedCdmaMethodCall("requestChangeCbPsw");
     }
 
+    @Override
+    public boolean isRadioOn() {
+        return mCi.getRadioState().isOn();
+    }
+
     // IMS APIs - Implemented only in ImsPhone
     public void acceptCall(int callType) throws CallStateException {
         throw new CallStateException("Accept with CallType is not supported in this phone " + this);
@@ -1500,10 +1553,28 @@ public abstract class PhoneBase extends Handler implements Phone {
                 + this);
     }
 
+    public void addParticipant(String dialString, int clir, int callType, String[] extras)
+            throws CallStateException {
+        throw new CallStateException("addParticipant is not supported in this phone " + this);
+    }
+
+    public void hangupWithReason(int callId, String userUri,
+            boolean mpty, int failCause, String errorInfo) throws CallStateException {
+        throw new CallStateException("hangupWithReason is not supported in this phone "
+                + this);
+    }
+
     public void registerForModifyCallRequest(Handler h, int what, Object obj)
             throws CallStateException {
         throw new CallStateException("registerForModifyCallRequest is not supported in this phone "
                 + this);
+    }
+
+    /*
+     * To check VT call capability
+     */
+    public boolean isVTModifyAllowed() throws CallStateException {
+        throw new CallStateException("isVTModifyAllowed is not supported in this phone " + this);
     }
 
     public void unregisterForModifyCallRequest(Handler h) throws CallStateException {
@@ -1544,6 +1615,7 @@ public abstract class PhoneBase extends Handler implements Phone {
                 + this);
     }
 
+
     /**
      * Returns the subscription id.
      * Always returns default subscription(ie., 0).
@@ -1570,10 +1642,5 @@ public abstract class PhoneBase extends Handler implements Phone {
     @Override
     public void setLocalCallHold(int lchStatus, Message response) {
         mCi.setLocalCallHold(lchStatus, response);
-    }
-
-    @Override
-    public boolean isRadioOn() {
-        return mCi.getRadioState().isOn();
     }
 }

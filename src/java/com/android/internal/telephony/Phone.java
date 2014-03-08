@@ -1,7 +1,6 @@
 /*
  * Copyright (c) 2012-13, The Linux Foundation. All rights reserved.
  * Not a Contribution.
- *
  * Copyright (C) 2007 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -106,11 +105,10 @@ public interface Phone {
     static final String REASON_DATA_DEPENDENCY_MET = "dependencyMet";
     static final String REASON_DATA_DEPENDENCY_UNMET = "dependencyUnmet";
     static final String REASON_LOST_DATA_CONNECTION = "lostDataConnection";
-    static final String REASON_LINK_PROPERTIES_CHANGED = "linkPropertiesChanged";
     static final String REASON_CONNECTED = "connected";
-    static final String REASON_TETHERED_MODE_STATE_CHANGED = "tetheredModeStateChanged";
-    static final String REASON_SINGLE_PDN_ARBITRATION = "SinglePdnArbitration";
     static final String REASON_NV_READY = "nvReady";
+    static final String REASON_SINGLE_PDN_ARBITRATION = "SinglePdnArbitration";
+    static final String REASON_IWLAN_AVAILABLE = "iwlanAvailable";
 
     // Used for band mode selection methods
     static final int BM_UNSPECIFIED = 0; // selected by baseband automatically
@@ -686,20 +684,6 @@ public interface Phone {
      */
     public void unregisterForSimRecordsLoaded(Handler h);
 
-     /**
-     * Registration point for Voice system id change
-     * @param h handler to notify
-     * @param what what code of message when delivered
-     * @param obj placed in Message.obj
-     */
-    public void registerForUnsolVoiceSystemId(Handler h, int what, Object obj);
-
-    /**
-     * Unregister for notifications for Voice system id change
-     * @param h Handler to be removed from the registrant list.
-     */
-    public void unregisterForUnsolVoiceSystemId(Handler h);
-
     /**
      * Returns SIM record load state. Use
      * <code>getSimCard().registerForReady()</code> for change notification.
@@ -829,8 +813,34 @@ public interface Phone {
     void explicitCallTransfer() throws CallStateException;
 
     /**
-     * Clears all DISCONNECTED connections from Call connection lists.
-     * Calls that were in the DISCONNECTED state become idle. This occurs
+     * Add participant during Conference Call
+     *
+     * @param dialString
+     * @param clir
+     * @param callType
+     * @param extras
+     * @throws CallStateException
+     */
+    void addParticipant(String dialString, int clir, int callType, String[] extras)
+            throws CallStateException;
+
+    /**
+     * Hangup along with reason/error message if any
+     *
+     * @param callId
+     * @param userUri
+     * @param confUri
+     * @param mpty
+     * @param failCause
+     * @param errorInfo
+     * @throws CallStateException
+     */
+    void hangupWithReason(int callId, String userUri,
+            boolean mpty, int failCause, String errorInfo) throws CallStateException;
+
+    /**
+     * Clears all DISCONNECTED connections from Call connection lists. Calls
+     * that were in the DISCONNECTED state become idle. This occurs
      * synchronously.
      */
     void clearDisconnected();
@@ -1853,6 +1863,15 @@ public interface Phone {
     void requestIsimAuthentication(String nonce, Message response);
 
     /**
+     * Sets the SIM voice message waiting indicator records.
+     * @param line GSM Subscriber Profile Number, one-based. Only '1' is supported
+     * @param countWaiting The number of messages waiting, if known. Use
+     *                     -1 to indicate that an unknown number of
+     *                      messages are waiting
+     */
+    void setVoiceMessageWaiting(int line, int countWaiting);
+
+    /**
      * Gets the USIM service table from the UICC, if present and available.
      * @return an interface to the UsimServiceTable record, or null if not available
      */
@@ -1875,6 +1894,19 @@ public interface Phone {
             Message onComplete);
 
     void requestChangeCbPsw(String facility, String oldPwd, String newPwd, Message result);
+
+    /**
+     * Update the phone object if the voice radio technology has changed
+     *
+     * @param voiceRadioTech The new voice radio technology
+     */
+    void updatePhoneObject(int voiceRadioTech);
+
+    /**
+     * Checks the radioState
+     * @return, true if radio state = RADIO_ON, false otherwise
+     */
+    boolean isRadioOn();
 
     /**
      * When the remote party in an IMS Call wants to upgrade or downgrade a
@@ -1936,6 +1968,11 @@ public interface Phone {
      */
     public void rejectConnectionTypeChange(Connection conn) throws CallStateException;
 
+    /*
+     * To check VT call capability
+     */
+    public boolean isVTModifyAllowed() throws CallStateException;
+
     /**
      * When a remote user requests to change the type of the connection (e.g. to
      * upgrade from voice to video), it will be possible to query the proposed
@@ -1983,10 +2020,4 @@ public interface Phone {
      * @param response is callback message
      */
     void setLocalCallHold(int lchStatus, Message response);
-
-    /**
-     * Checks the radioState
-     * @return, true if radio state = RADIO_ON, false otherwise
-     */
-    boolean isRadioOn();
 }

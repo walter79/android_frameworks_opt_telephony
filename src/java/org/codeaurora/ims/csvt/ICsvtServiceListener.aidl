@@ -53,11 +53,17 @@ oneway interface ICsvtServiceListener{
      * @param enabled, if true call waiting is activated, false otherwise.
      * @see ICsvtService.getCallWaiting
      */
-    void onCallWaiting( boolean enabled );
+    void onCallWaiting(boolean enabled);
 
     /**
      * Called to notify about call forwarding options.
      * @param fi, Call Forwarding options.
      */
-    void onCallForwardingOptions( in List<CallForwardInfoP> fi );
+    void onCallForwardingOptions(in List<CallForwardInfoP> fi);
+
+    /**
+     * Called to notify about ringback tone state.
+     * @param playTone, if true ringback tone will be played, false otherwise.
+     */
+    void onRingbackTone(boolean playTone);
 }

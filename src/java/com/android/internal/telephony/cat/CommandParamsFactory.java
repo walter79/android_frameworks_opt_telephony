@@ -409,7 +409,6 @@ public class CommandParamsFactory extends Handler {
         if (textMsg.text == null && iconId != null && !textMsg.iconSelfExplanatory) {
             throw new ResultException(ResultCode.CMD_DATA_NOT_UNDERSTOOD);
         }
-
         mCmdParams = new DisplayTextParams(cmdDet, textMsg);
 
         if (iconId != null) {
@@ -1049,6 +1048,7 @@ public class CommandParamsFactory extends Handler {
         }
         return false;
     }
+
     public void dispose() {
         mIconLoader.dispose();
         mIconLoader = null;

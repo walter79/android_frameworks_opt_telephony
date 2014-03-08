@@ -62,6 +62,9 @@ public interface IccConstants {
     static final int EF_CSP_CPHS = 0x6f15;
 
     // CDMA RUIM file ids from 3GPP2 C.S0023-0
+    // RUIM EF stores the (up to) 56-bit electronic identification
+    // number (ID) unique to the R-UIM. (Removable UIM_ID)
+    static final int EF_RUIM_ID = 0x6f31;
     static final int EF_CST = 0x6f32;
     static final int EF_RUIM_SPN =0x6F41;
 
@@ -81,6 +84,9 @@ public interface IccConstants {
     static final int EF_DOMAIN = 0x6f03;
     static final int EF_IST = 0x6f07;
     static final int EF_PCSCF = 0x6f09;
+
+    //plmnwact
+    static final int EF_PLMNWACT = 0x6F60;
 
     // SMS record length from TS 51.011 10.5.3
     static public final int SMS_RECORD_LENGTH = 176;

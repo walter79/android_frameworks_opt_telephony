@@ -24,6 +24,8 @@ import android.os.Registrant;
 import android.os.RegistrantList;
 import android.telephony.Rlog;
 
+import android.telephony.ServiceState;
+
 import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.uicc.IccCardApplicationStatus.AppState;
 
@@ -74,12 +76,14 @@ public class UiccController extends Handler {
     protected static final boolean DBG = true;
     protected static final String LOG_TAG = "UiccController";
 
+    public static final int APP_FAM_UNKNOWN =  -1;
     public static final int APP_FAM_3GPP =  1;
     public static final int APP_FAM_3GPP2 = 2;
     public static final int APP_FAM_IMS   = 3;
 
     protected static final int EVENT_ICC_STATUS_CHANGED = 1;
     protected static final int EVENT_GET_ICC_STATUS_DONE = 2;
+    protected static final int EVENT_RADIO_UNAVAILABLE = 3;
     private static final int EVENT_REFRESH = 4;
 
     protected static final Object mLock = new Object();
@@ -108,6 +112,22 @@ public class UiccController extends Handler {
                         "UiccController.getInstance can't be called before make()");
             }
             return mInstance;
+        }
+    }
+
+    public static void destroy() {
+        synchronized (mLock) {
+            if (mInstance == null) {
+                throw new RuntimeException(
+                        "UiccController.destroy() should only be called after make()");
+            }
+            mInstance.mCi.unregisterForIccStatusChanged(mInstance);
+            mInstance.mCi.unregisterForAvailable(mInstance);
+            mInstance.mCi.unregisterForNotAvailable(mInstance);
+            mInstance.mCi.unregisterForIccRefresh(mInstance);
+            mInstance.mCi = null;
+            mInstance.mContext = null;
+            mInstance = null;
         }
     }
 
@@ -153,6 +173,18 @@ public class UiccController extends Handler {
         }
     }
 
+    public static int getFamilyFromRadioTechnology(int radioTechnology) {
+        if (ServiceState.isGsm(radioTechnology) ||
+                radioTechnology == ServiceState.RIL_RADIO_TECHNOLOGY_EHRPD) {
+            return  UiccController.APP_FAM_3GPP;
+        } else if (ServiceState.isCdma(radioTechnology)) {
+            return  UiccController.APP_FAM_3GPP2;
+        } else {
+            // If it is UNKNOWN rat
+            return UiccController.APP_FAM_UNKNOWN;
+        }
+    }
+
     //Notifies when card status changes
     public void registerForIccChanged(Handler h, int what, Object obj) {
         synchronized (mLock) {
@@ -183,6 +215,12 @@ public class UiccController extends Handler {
                     AsyncResult ar = (AsyncResult)msg.obj;
                     onGetIccCardStatusDone(ar);
                     break;
+                case EVENT_RADIO_UNAVAILABLE:
+                    if (DBG) log("EVENT_RADIO_UNAVAILABLE ");
+                    disposeCard(mUiccCard);
+                    mUiccCard = null;
+                    mIccChangedRegistrants.notifyRegistrants();
+                    break;
                 case EVENT_REFRESH:
                     ar = (AsyncResult)msg.obj;
                     if (DBG) log("Sim REFRESH received");
@@ -195,6 +233,14 @@ public class UiccController extends Handler {
                 default:
                     Rlog.e(LOG_TAG, " Unknown Event " + msg.what);
             }
+        }
+    }
+
+    // Destroys the card object
+    protected synchronized void disposeCard(UiccCard uiccCard) {
+        if (DBG) log("Disposing card");
+        if (uiccCard != null) {
+            uiccCard.dispose();
         }
     }
 
@@ -217,8 +263,8 @@ public class UiccController extends Handler {
         mContext = c;
         mCi = ci;
         mCi.registerForIccStatusChanged(this, EVENT_ICC_STATUS_CHANGED, null);
-        // TODO remove this once modem correctly notifies the unsols
         mCi.registerForOn(this, EVENT_ICC_STATUS_CHANGED, null);
+        mCi.registerForNotAvailable(this, EVENT_RADIO_UNAVAILABLE, null);
         mCi.registerForIccRefresh(this, EVENT_REFRESH, null);
     }
 
@@ -233,10 +279,10 @@ public class UiccController extends Handler {
         IccCardStatus status = (IccCardStatus)ar.result;
 
         if (mUiccCard == null) {
-            //Create new card
+            if (DBG) log("Creating a new card");
             mUiccCard = new UiccCard(mContext, mCi, status);
         } else {
-            //Update already existing card
+            if (DBG) log("Update already existing card");
             mUiccCard.update(mContext, mCi , status);
         }
 
@@ -247,7 +293,7 @@ public class UiccController extends Handler {
     protected UiccController() {
     }
 
-    private void log(String string) {
+    private static void log(String string) {
         Rlog.d(LOG_TAG, string);
     }
 

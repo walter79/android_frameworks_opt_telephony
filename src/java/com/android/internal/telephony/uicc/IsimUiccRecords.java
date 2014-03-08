@@ -65,6 +65,8 @@ public final class IsimUiccRecords extends IccRecords implements IsimRecords {
     public IsimUiccRecords(UiccCardApplication app, Context c, CommandsInterface ci) {
         super(app, c, ci);
 
+        mAdnCache = new AdnRecordCache(mFh);
+
         mRecordsRequested = false;  // No load request is made till SIM ready
 
         // recordsToLoad is set to 0 because no requests are made yet
@@ -267,7 +269,7 @@ public final class IsimUiccRecords extends IccRecords implements IsimRecords {
     }
 
     @Override
-    public void setVoiceMessageWaiting(int line, int countWaiting, Message onComplete) {
+    public void setVoiceMessageWaiting(int line, int countWaiting) {
         // Not applicable to Isim
     }
 
@@ -295,4 +297,5 @@ public final class IsimUiccRecords extends IccRecords implements IsimRecords {
     public int getVoiceMessageCount() {
         return 0; // Not applicable to Isim
     }
+
 }

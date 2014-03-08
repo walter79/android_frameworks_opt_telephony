@@ -1,8 +1,8 @@
 /*
- * Copyright (C) 2006 The Android Open Source Project
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- *
  * Not a Contribution.
+ *
+ * Copyright (C) 2006 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import android.content.Context;
 import android.os.Message;
 import android.os.RegistrantList;
 import android.os.Registrant;
+import android.os.Message;
 import android.os.Handler;
 import android.os.AsyncResult;
 import android.telephony.TelephonyManager;
@@ -68,13 +69,11 @@ public abstract class BaseCommands implements CommandsInterface {
     protected RegistrantList mRilConnectedRegistrants = new RegistrantList();
     protected RegistrantList mIccRefreshRegistrants = new RegistrantList();
     protected RegistrantList mRilCellInfoListRegistrants = new RegistrantList();
-    protected RegistrantList mTetheredModeStateRegistrants = new RegistrantList();
     protected RegistrantList mSubscriptionStatusRegistrants = new RegistrantList();
     protected RegistrantList mCdmaFwdBurstDtmfRegistrants = new RegistrantList();
     protected RegistrantList mCdmaFwdContDtmfStartRegistrants = new RegistrantList();
     protected RegistrantList mCdmaFwdContDtmfStopRegistrants = new RegistrantList();
     protected RegistrantList mWmsReadyRegistrants = new RegistrantList();
-    protected RegistrantList mVoiceSystemIdRegistrants = new RegistrantList();
 
     protected Registrant mGsmSmsRegistrant;
     protected Registrant mCdmaSmsRegistrant;
@@ -737,19 +736,15 @@ public abstract class BaseCommands implements CommandsInterface {
         mWmsReadyRegistrants.remove(h);
     }
 
-    public void registerForUnsolVoiceSystemId(Handler h, int what, Object obj) {
-        mVoiceSystemIdRegistrants.addUnique(h, what, obj);
-    }
-
-    public void unregisterForUnsolVoiceSystemId(Handler h) {
-        mVoiceSystemIdRegistrants.remove(h);
-    }
-
     /**
      * {@inheritDoc}
      */
     @Override
     public void setCurrentPreferredNetworkType() {
+    }
+
+    @Override
+    public void getDataCallProfile(int appType, Message result) {
     }
 
     //***** Protected Methods
@@ -840,16 +835,23 @@ public abstract class BaseCommands implements CommandsInterface {
     @Override
     public void testingEmergencyCall() {}
 
+    @Override
+    public int getRilVersion() {
+        return mRilVersion;
+    }
+
+    public void setUiccSubscription(int slotId, int appIndex, int subId, int subStatus,
+            Message response) {
+    }
+
+    public void setDataSubscription(Message response) {
+    }
+
     /**
      * @hide
      */
     @Override
     public int getLteOnGsmMode() {
         return TelephonyManager.getLteOnGsmModeStatic();
-    }
-
-    @Override
-    public int getRilVersion() {
-        return mRilVersion;
     }
 }

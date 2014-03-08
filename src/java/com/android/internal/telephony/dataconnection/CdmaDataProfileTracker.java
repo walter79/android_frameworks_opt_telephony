@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
  * Not a Contribution.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -54,7 +54,6 @@ import com.android.internal.telephony.RILConstants;
 import com.android.internal.telephony.cdma.CdmaSubscriptionSourceManager;
 
 /**
- * This is used only for OMH data profiles
  * {@hide}
  */
 public final class CdmaDataProfileTracker extends Handler {
@@ -73,11 +72,20 @@ public final class CdmaDataProfileTracker extends Handler {
      */
     private ArrayList<DataProfile> mDataProfilesList = new ArrayList<DataProfile>();
 
-    private static final String[] SUPPORTED_APN_TYPES = {
+    private static final String[] mSupportedApnTypes = {
             PhoneConstants.APN_TYPE_DEFAULT,
             PhoneConstants.APN_TYPE_MMS,
             PhoneConstants.APN_TYPE_SUPL,
             PhoneConstants.APN_TYPE_DUN,
+            PhoneConstants.APN_TYPE_HIPRI,
+            PhoneConstants.APN_TYPE_FOTA,
+            PhoneConstants.APN_TYPE_IMS,
+            PhoneConstants.APN_TYPE_CBS };
+
+    private static final String[] mDefaultApnTypes = {
+            PhoneConstants.APN_TYPE_DEFAULT,
+            PhoneConstants.APN_TYPE_MMS,
+            PhoneConstants.APN_TYPE_SUPL,
             PhoneConstants.APN_TYPE_HIPRI,
             PhoneConstants.APN_TYPE_FOTA,
             PhoneConstants.APN_TYPE_IMS,
@@ -96,7 +104,7 @@ public final class CdmaDataProfileTracker extends Handler {
      */
     private int mOmhReadProfileCount = 0;
 
-    private boolean mIsOmhEnabled =
+    public static final boolean OMH_ENABLED =
             SystemProperties.getBoolean(PROPERTY_OMH_ENABLED, false);
 
     // Enumerated list of DataProfile from the modem.
@@ -126,7 +134,7 @@ public final class CdmaDataProfileTracker extends Handler {
 
         sendMessage(obtainMessage(EVENT_LOAD_PROFILES));
 
-        log("SUPPORT_OMH: " + mIsOmhEnabled);
+        log("SUPPORT_OMH: " + OMH_ENABLED);
     }
 
     /**
@@ -202,7 +210,7 @@ public final class CdmaDataProfileTracker extends Handler {
      * Trigger modem read for data profiles
      */
     private void readDataProfilesFromModem() {
-        if (mIsOmhEnabled) {
+        if (OMH_ENABLED) {
             sendMessage(obtainMessage(EVENT_READ_MODEM_PROFILES));
         } else {
             log("OMH is disabled, ignoring request!");
@@ -281,8 +289,8 @@ public final class CdmaDataProfileTracker extends Handler {
                  * before adding it. This implies that the (similar) profile with same
                  * priority already exists.
                  */
-                DataProfileOmh omhDuplicatedp = getDuplicateProfile(dp);
-                if (null == omhDuplicatedp) {
+                DataProfileOmh omhDuplicateDp = getDuplicateProfile(dp);
+                if (null == omhDuplicateDp) {
                     mTempOmhDataProfilesList.add(dp);
                     ((DataProfileOmh)dp).addServiceType(DataProfileTypeModem.
                             getDataProfileTypeModem(serviceType));
@@ -293,15 +301,15 @@ public final class CdmaDataProfileTracker extends Handler {
                      *  'dp' instance is found at this point. Add the non-provisioned
                      *   service type to this 'dp' instance
                      */
-                    log("OMH: Duplicate Profile " + omhDuplicatedp);
-                    ((DataProfileOmh)omhDuplicatedp).addServiceType(DataProfileTypeModem.
+                    log("OMH: Duplicate Profile " + omhDuplicateDp);
+                    omhDuplicateDp.addServiceType(DataProfileTypeModem.
                             getDataProfileTypeModem(serviceType));
                 }
             }
         }
 
         //(Re)Load APN List
-        if(mOmhReadProfileCount == 0) {
+        if (mOmhReadProfileCount == 0) {
             log("OMH: Modem omh profile read complete.");
             addServiceTypeToUnSpecified();
             mDataProfilesList.addAll(mTempOmhDataProfilesList);
@@ -332,7 +340,7 @@ public final class CdmaDataProfileTracker extends Handler {
         // Go through all the profiles to find one
         for (DataProfile dp: mDataProfilesList) {
             if (dp.canHandleType(serviceType)) {
-                if (mIsOmhEnabled &&
+                if (OMH_ENABLED &&
                     dp.getDataProfileType() != DataProfile.DataProfileType.PROFILE_TYPE_OMH) {
                     // OMH enabled - Keep looking for OMH profile
                     continue;
@@ -343,7 +351,7 @@ public final class CdmaDataProfileTracker extends Handler {
         }
 
         if (profile == null) {
-            log("getDataProfile: OMH profile not found for "+serviceType);
+            log("getDataProfile: OMH profile not found for " + serviceType);
 
             for (DataProfile dp: mDataProfilesList) {
                 if (dp.canHandleType(serviceType)) {
@@ -352,11 +360,11 @@ public final class CdmaDataProfileTracker extends Handler {
                 }
             }
 
-            log("getDataProfile: using hardcoded profile "+profile);
+            log("getDataProfile: using hardcoded profile " + profile);
 
         }
 
-        log("getDataProfile: return profile="+profile);
+        log("getDataProfile: return profile=" + profile);
         return profile;
     }
 
@@ -364,7 +372,7 @@ public final class CdmaDataProfileTracker extends Handler {
      * UNSPECIFIED/DEFAULT data profile.
      */
     private void addServiceTypeToUnSpecified() {
-        for (String apntype : SUPPORTED_APN_TYPES) {
+        for (String apntype : mSupportedApnTypes) {
             if(!mOmhServicePriorityMap.containsKey(apntype)) {
 
                 // ServiceType :apntype is not provisioned in the card,
@@ -425,27 +433,16 @@ public final class CdmaDataProfileTracker extends Handler {
     }
 
     public boolean isOmhEnabled() {
-        return mIsOmhEnabled;
+        return OMH_ENABLED;
     }
 
     protected boolean isApnTypeAvailable(String type) {
-        for (String s : SUPPORTED_APN_TYPES) {
+        for (String s : mSupportedApnTypes) {
             if (TextUtils.equals(type, s)) {
                 return true;
             }
         }
         return false;
-    }
-
-    protected String[] getActiveApnTypes() {
-        String[] result;
-        if (mActiveDp != null) {
-            result = mActiveDp.getServiceTypes();
-        } else {
-            result = new String[1];
-            result[0] = PhoneConstants.APN_TYPE_DEFAULT;
-        }
-        return result;
     }
 
     protected void log(String s) {
@@ -456,3 +453,4 @@ public final class CdmaDataProfileTracker extends Handler {
         Log.e(LOG_TAG, "[CdmaDataProfileTracker] " + s);
     }
 }
+

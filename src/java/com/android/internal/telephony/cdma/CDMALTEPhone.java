@@ -1,6 +1,5 @@
-/*
+/* 
  * Copyright (C) 2011 The Android Open Source Project
- * Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,11 +29,13 @@ import android.telephony.Rlog;
 import android.telephony.ServiceState;
 
 import com.android.internal.telephony.CommandsInterface;
+
 import com.android.internal.telephony.OperatorInfo;
 import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.PhoneNotifier;
 import com.android.internal.telephony.PhoneProxy;
 import com.android.internal.telephony.SMSDispatcher;
+import com.android.internal.telephony.SmsBroadcastUndelivered;
 import com.android.internal.telephony.gsm.GsmSMSDispatcher;
 import com.android.internal.telephony.gsm.SmsMessage;
 import com.android.internal.telephony.uicc.IsimRecords;
@@ -75,12 +76,12 @@ public class CDMALTEPhone extends CDMAPhone {
 
     @Override
     public void handleMessage (Message msg) {
-        AsyncResult ar;
         switch (msg.what) {
             // handle the select network completion callbacks.
             case EVENT_SET_NETWORK_MANUAL_COMPLETE:
                 handleSetSelectNetwork((AsyncResult) msg.obj);
                 break;
+
             default:
                 super.handleMessage(msg);
         }
@@ -89,6 +90,18 @@ public class CDMALTEPhone extends CDMAPhone {
     @Override
     protected void initSstIcc() {
         mSST = new CdmaLteServiceStateTracker(this);
+    }
+
+    @Override
+    public void dispose() {
+        synchronized(PhoneProxy.lockForRadioTechnologyChange) {
+            super.dispose();
+        }
+    }
+
+    @Override
+    public void removeReferences() {
+        super.removeReferences();
     }
 
     @Override
@@ -103,7 +116,7 @@ public class CDMALTEPhone extends CDMAPhone {
         } else if (mSST.getCurrentDataConnectionState() != ServiceState.STATE_IN_SERVICE &&
                             mOosIsDisconnect) {
             ret = PhoneConstants.DataState.DISCONNECTED;
-            Rlog.d(LOG_LTE_TAG, "getDataConnectionState: Data is Out of Service. ret = " + ret);
+            log("getDataConnectionState: Data is Out of Service. ret = " + ret);
         } else if (mDcTracker.isApnTypeEnabled(apnType) == false) {
             ret = PhoneConstants.DataState.DISCONNECTED;
         } else {
@@ -187,13 +200,34 @@ public class CDMALTEPhone extends CDMAPhone {
 
     }
 
+
+    /**
+     * Sets the "current" field in the telephony provider according to the
+     * build-time operator numeric property
+     *
+     * @return true for success; false otherwise.
+     */
+    @Override
+    boolean updateCurrentCarrierInProvider(String operatorNumeric) {
+        boolean retVal;
+        if (mUiccController.getUiccCardApplication(UiccController.APP_FAM_3GPP) == null) {
+            if (DBG) log("updateCurrentCarrierInProvider APP_FAM_3GPP == null");
+            retVal = super.updateCurrentCarrierInProvider(operatorNumeric);
+        } else {
+            if (DBG) log("updateCurrentCarrierInProvider not updated");
+            retVal = true;
+        }
+        if (DBG) log("updateCurrentCarrierInProvider X retVal=" + retVal);
+        return retVal;
+    }
+
     @Override
     public boolean updateCurrentCarrierInProvider() {
-        if (mSimRecords != null) {
+        if (mIccRecords.get() != null) {
             try {
                 Uri uri = Uri.withAppendedPath(Telephony.Carriers.CONTENT_URI, "current");
                 ContentValues map = new ContentValues();
-                String operatorNumeric = mSimRecords.getOperatorNumeric();
+                String operatorNumeric = mIccRecords.get().getOperatorNumeric();
                 map.put(Telephony.Carriers.NUMERIC, operatorNumeric);
                 if (DBG) log("updateCurrentCarrierInProvider from UICC: numeric=" +
                         operatorNumeric);
@@ -208,11 +242,14 @@ public class CDMALTEPhone extends CDMAPhone {
         return false;
     }
 
-    // return IMSI from USIM as subscriber ID.
-    @Override
-    public String getSubscriberId() {
-        return (mSimRecords != null) ? mSimRecords.getIMSI() : "";
-    }
+   @Override
+   public String getSubscriberId() {
+       if ((super.getSubscriberId()) != null) {
+           return super.getSubscriberId();
+       } else {
+           return (mSimRecords != null) ? mSimRecords.getIMSI() : "";
+       }
+   }
 
     // return GID1 from USIM
     @Override

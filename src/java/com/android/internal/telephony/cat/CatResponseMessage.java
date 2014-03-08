@@ -62,11 +62,6 @@ public class CatResponseMessage {
             mAdditionalInfo = info;
         }
 
-        public void setAdditionalInfo(boolean includeAdditionalInfo, int additionalInfo) {
-            this.mIncludeAdditionalInfo = includeAdditionalInfo;
-            this.mAdditionalInfo = additionalInfo;
-        }
-
         CommandDetails getCmdDetails() {
             return mCmdDet;
         }

@@ -148,11 +148,6 @@ public final class RuimRecords extends IccRecords {
         mRecordsRequested = false;
     }
 
-    @Override
-    public String getIMSI() {
-        return mImsi;
-    }
-
     public String getMdnNumber() {
         return mMyMobileNumber;
     }
@@ -206,11 +201,6 @@ public final class RuimRecords extends IccRecords {
         return digits;
     }
 
-    @Override
-    public String getOperatorNumeric() {
-        return getRUIMOperatorNumeric();
-    }
-
     /**
      * Decode utility to decode IMSI from data read from EF_IMSIM
      * Please refer to
@@ -250,7 +240,9 @@ public final class RuimRecords extends IccRecords {
      * Returns the 5 or 6 digit MCC/MNC of the operator that
      *  provided the RUIM card. Returns null of RUIM is not yet ready
      */
-    public String getRUIMOperatorNumeric() {
+
+    @Override
+    public String getOperatorNumeric() {
         if (mImsi == null) {
             return null;
         }
@@ -350,6 +342,7 @@ public final class RuimRecords extends IccRecords {
                 case UserData.ENCODING_IA5:
                 case UserData.ENCODING_GSM_7BIT_ALPHABET:
                     mSpn = GsmAlphabet.gsm7BitPackedToString(spnData, 0, (numBytes*8)/7);
+                    break;
                 case UserData.ENCODING_7BIT_ASCII:
                     mSpn =  new String(spnData, 0, numBytes, "US-ASCII");
                         // To address issues with incorrect encoding scheme
@@ -654,25 +647,6 @@ public final class RuimRecords extends IccRecords {
     protected void onAllRecordsLoaded() {
         if (DBG) log("record load complete");
 
-        // Further records that can be inserted are Operator/OEM dependent
-
-        String operator = getRUIMOperatorNumeric();
-        if (!TextUtils.isEmpty(operator)) {
-            log("onAllRecordsLoaded set 'gsm.sim.operator.numeric' to operator='" +
-                    operator + "'");
-            setSystemProperty(PROPERTY_ICC_OPERATOR_NUMERIC, operator);
-        } else {
-            log("onAllRecordsLoaded empty 'gsm.sim.operator.numeric' skipping");
-        }
-
-        if (!TextUtils.isEmpty(mImsi)) {
-            log("onAllRecordsLoaded set mcc imsi=" + mImsi);
-            setSystemProperty(PROPERTY_ICC_OPERATOR_ISO_COUNTRY,
-                    MccTable.countryCodeForMcc(Integer.parseInt(mImsi.substring(0,3))));
-        } else {
-            log("onAllRecordsLoaded empty imsi skipping setting mcc");
-        }
-
         setLocaleFromCsim();
         mRecordsLoadedRegistrants.notifyRegistrants(
             new AsyncResult(null, null, null));
@@ -690,24 +664,22 @@ public final class RuimRecords extends IccRecords {
      * We use this as a trigger to read records from the card.
      */
     void recordsRequired() {
-        if (DBG) log("recordsRequired");
-        mRecordsRequired = true;
-
-        // trigger to retrieve all records
-        fetchRuimRecords();
+        if (DBG) log("recordsRequired mRecordsRequired = " + mRecordsRequired);
+        if (!mRecordsRequired) {
+            mRecordsRequired = true;
+            // trigger to retrieve all records
+            fetchRuimRecords();
+        }
     }
 
     private void fetchRuimRecords() {
         /* Don't read records if we don't expect
          * anyone to ask for them
          *
-         * If we have already requested records OR
-         * records are not required by anyone OR
-         * the app is not ready
-         * then bail
+         * If records are not required by anyone OR
+         * the app is not ready then bail
          */
-        if (mRecordsRequested || !mRecordsRequired
-            || AppState.APPSTATE_READY != mParentApp.getState()) {
+        if (!mRecordsRequired || AppState.APPSTATE_READY != mParentApp.getState()) {
             if (DBG) log("fetchRuimRecords: Abort fetching records rRecordsRequested = "
                             + mRecordsRequested
                             + " state = " + mParentApp.getState()
@@ -792,17 +764,17 @@ public final class RuimRecords extends IccRecords {
     }
 
     @Override
-    public void setVoiceMessageWaiting(int line, int countWaiting, Message onComplete) {
-        //Will be used in future to store voice mail count in UIM
-        //C.S0023-D_v1.0 does not have a file id in UIM for MWI
-        Rlog.d(LOG_TAG, "RuimRecords:setVoiceMessageWaiting - NOP for CDMA");
+    public void setVoiceMessageWaiting(int line, int countWaiting) {
+        // Will be used in future to store voice mail count in UIM
+        // C.S0023-D_v1.0 does not have a file id in UIM for MWI
+        log("RuimRecords:setVoiceMessageWaiting - NOP for CDMA");
     }
 
     @Override
     public int getVoiceMessageCount() {
-        //Will be used in future to retrieve voice mail count for UIM
-        //C.S0023-D_v1.0 does not have a file id in UIM for MWI
-        Rlog.d(LOG_TAG, "RuimRecords:getVoiceMessageCount - NOP for CDMA");
+        // Will be used in future to retrieve voice mail count for UIM
+        // C.S0023-D_v1.0 does not have a file id in UIM for MWI
+        log("RuimRecords:getVoiceMessageCount - NOP for CDMA");
         return 0;
     }
 

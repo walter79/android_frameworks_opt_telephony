@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
- * Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -396,10 +395,30 @@ public class SmsMessage extends SmsMessageBase {
     public static SubmitPdu getSubmitPdu(String scAddress,
             String destinationAddress, int destinationPort, byte[] data,
             boolean statusReportRequested) {
+        return getSubmitPdu(scAddress, destinationAddress, destinationPort, 0, data,
+                statusReportRequested);
+
+    }
+
+     /**
+     * Get an SMS-SUBMIT PDU for a data message to a destination address and port
+     *
+     * @param scAddress Service Centre address. null == use default
+     * @param destinationAddress the address of the destination for the message
+     * @param destinationPort the port to deliver the message to at the destination
+     * @param originatorPort the originator port set by the sender
+     * @param data the data for the message
+     * @return a <code>SubmitPdu</code> containing the encoded SC
+     *         address, if applicable, and the encoded message.
+     *         Returns null on encode error.
+     */
+    public static SubmitPdu getSubmitPdu(String scAddress,
+            String destinationAddress, int destinationPort, int originatorPort, byte[] data,
+            boolean statusReportRequested) {
 
         SmsHeader.PortAddrs portAddrs = new SmsHeader.PortAddrs();
         portAddrs.destPort = destinationPort;
-        portAddrs.origPort = 0;
+        portAddrs.origPort = originatorPort;
         portAddrs.areEightBits = false;
 
         SmsHeader smsHeader = new SmsHeader();
@@ -560,8 +579,9 @@ public class SmsMessage extends SmsMessageBase {
             try {
                 ret = new GsmSmsAddress(mPdu, mCur, lengthBytes);
             } catch (ParseException e) {
-                Rlog.e(LOG_TAG, e.getMessage());
                 ret = null;
+                //This is caught by createFromPdu(byte[] pdu)
+                throw new RuntimeException(e.getMessage());
             }
 
             mCur += lengthBytes;

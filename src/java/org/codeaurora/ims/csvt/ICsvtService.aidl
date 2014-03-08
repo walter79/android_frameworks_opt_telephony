@@ -37,7 +37,7 @@ interface ICsvtService {
      * cannot assume the audio path is connected (or a call index has been
      * assigned) until PhoneStateChanged notification has occurred.
      */
-     void dial( String number );
+     void dial(String number);
 
     /**
      * Hang up the foreground call. Reject occurs asynchronously,
